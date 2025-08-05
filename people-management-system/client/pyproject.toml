@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "people-management-client"
+version = "0.1.0"
+description = "PySide6 GUI client for the people management system"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+requires-python = ">=3.9"
+license = "MIT"
+
+dependencies = [
+    "PySide6>=6.6.0",
+    "requests>=2.31.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",  # For environment variables
+    "keyring>=24.0.0",  # For secure credential storage
+    "platformdirs>=4.0.0",  # For application data directories
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-qt>=4.2.0",  # For testing Qt applications
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+    "pre-commit>=3.0.0",
+    "qt-material>=2.14",  # For Material Design themes
+]
+
+test = [
+    "pytest>=7.0.0",
+    "pytest-qt>=4.2.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+people-client = "client.main:main"
+
+[project.gui-scripts]
+people-management = "client.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["client*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=client",
+    "--cov-report=html",
+    "--cov-report=term-missing",
+]
+qt_api = "pyside6"
+
+[tool.coverage.run]
+source = ["client"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+]
