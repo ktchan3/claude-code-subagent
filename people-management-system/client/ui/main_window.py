@@ -18,6 +18,7 @@ from PySide6.QtGui import QIcon, QFont, QAction, QPalette, QPixmap
 
 from client.services.api_service import APIService
 from client.services.config_service import ConfigService
+from client.utils.async_utils import QtSyncHelper
 from client.ui.views.dashboard_view import DashboardView
 from client.ui.views.people_view import PeopleView
 from client.ui.views.departments_view import DepartmentsView
@@ -49,6 +50,7 @@ class MainWindow(QMainWindow):
         
         self.api_service = api_service
         self.config_service = config_service
+        self.async_helper = QtSyncHelper(self)
         
         # Window state
         self.current_view_name = "dashboard"
@@ -263,6 +265,9 @@ class MainWindow(QMainWindow):
         self.connection_indicator.setStyleSheet("color: green; font-size: 12pt; font-weight: bold;")
         self.connection_indicator.setToolTip("Connected to server")
         self.status_bar.addPermanentWidget(self.connection_indicator)
+        
+        # Update connection status now that the indicator is available
+        self.update_connection_status(self.api_service.is_connected)
     
     def setup_menu_bar(self):
         """Set up the menu bar."""
@@ -450,8 +455,11 @@ class MainWindow(QMainWindow):
         if connected:
             self.connection_status_label.setText("✓ Connected")
             self.connection_status_label.setStyleSheet("color: green; font-weight: bold;")
-            self.connection_indicator.setStyleSheet("color: green; font-size: 12pt; font-weight: bold;")
-            self.connection_indicator.setToolTip("Connected to server")
+            
+            # Only update connection_indicator if it exists (status bar has been set up)
+            if hasattr(self, 'connection_indicator'):
+                self.connection_indicator.setStyleSheet("color: green; font-size: 12pt; font-weight: bold;")
+                self.connection_indicator.setToolTip("Connected to server")
             
             # Update server info
             base_url = self.api_service.base_url
@@ -460,30 +468,40 @@ class MainWindow(QMainWindow):
         else:
             self.connection_status_label.setText("✗ Disconnected")
             self.connection_status_label.setStyleSheet("color: red; font-weight: bold;")
-            self.connection_indicator.setStyleSheet("color: red; font-size: 12pt; font-weight: bold;")
-            self.connection_indicator.setToolTip("Disconnected from server")
+            
+            # Only update connection_indicator if it exists (status bar has been set up)
+            if hasattr(self, 'connection_indicator'):
+                self.connection_indicator.setStyleSheet("color: red; font-size: 12pt; font-weight: bold;")
+                self.connection_indicator.setToolTip("Disconnected from server")
             
             self.server_info_label.setText("No connection")
     
     def show_connection_error(self, error_message: str):
         """Show connection error message."""
-        self.status_label.setText(f"Connection error: {error_message}")
+        if hasattr(self, 'status_label'):
+            self.status_label.setText(f"Connection error: {error_message}")
         logger.error(f"Connection error: {error_message}")
     
     def show_operation_status(self, operation: str):
         """Show operation status."""
-        self.status_label.setText(operation)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # Indeterminate
+        if hasattr(self, 'status_label'):
+            self.status_label.setText(operation)
+        if hasattr(self, 'progress_bar'):
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)  # Indeterminate
     
     def on_operation_completed(self, operation: str, success: bool, message: str):
         """Handle operation completion."""
-        self.progress_bar.setVisible(False)
+        if hasattr(self, 'progress_bar'):
+            self.progress_bar.setVisible(False)
         
-        if success:
-            self.status_label.setText(message)
-        else:
-            self.status_label.setText(f"Error: {message}")
+        if hasattr(self, 'status_label'):
+            if success:
+                self.status_label.setText(message)
+            else:
+                self.status_label.setText(f"Error: {message}")
+        
+        if not success:
             logger.error(f"Operation {operation} failed: {message}")
     
     def export_data(self):
@@ -576,11 +594,13 @@ class MainWindow(QMainWindow):
                     ui_config.sidebar_width = sizes[0]
                 
                 # Save config asynchronously
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self.config_service.update_ui_config(ui_config))
-                loop.close()
+                def on_error(error):
+                    logger.error(f"Error saving UI config: {error}")
+                
+                self.async_helper.call_sync(
+                    lambda: self.config_service.update_ui_config(ui_config),
+                    error_callback=on_error
+                )
                 
         except Exception as e:
             logger.error(f"Error saving window settings: {e}")
@@ -594,6 +614,10 @@ class MainWindow(QMainWindow):
             # Stop timers
             if hasattr(self, 'connection_timer'):
                 self.connection_timer.stop()
+            
+            # Clean up async helper
+            if self.async_helper:
+                self.async_helper.cleanup()
             
             # Emit closed signal
             self.closed.emit()

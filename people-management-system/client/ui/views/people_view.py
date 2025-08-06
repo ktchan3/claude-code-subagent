@@ -4,6 +4,7 @@ People Management View for People Management System Client
 Provides comprehensive interface for managing people records.
 """
 
+import json
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -51,6 +52,7 @@ class PersonDialog(QDialog):
         # Person form
         self.person_form = PersonForm()
         self.person_form.set_auto_save_enabled(False)  # Disable auto-save in dialog
+        self.person_form.set_action_buttons_visible(False)  # Hide form's own buttons
         layout.addWidget(self.person_form)
         
         # Dialog buttons
@@ -66,17 +68,42 @@ class PersonDialog(QDialog):
         self.ok_button = button_box.button(QDialogButtonBox.Ok)
         self.person_form.validation_changed.connect(self.ok_button.setEnabled)
         
+        # Connect form's save_requested signal (in case form is used directly)
+        self.person_form.save_requested.connect(self.on_form_save_requested)
+        
         # Initial validation
         self.ok_button.setEnabled(self.person_form.is_form_valid())
+        
+        # Also trigger validation when dialog is shown
+        self.person_form.validate_form()
     
     def accept_dialog(self):
         """Handle dialog acceptance."""
+        logger.debug("Dialog OK button clicked")
+        
         if self.person_form.is_form_valid():
+            logger.debug("Form is valid, accepting dialog")
             self.accept()
         else:
+            logger.debug(f"Form validation failed: {self.person_form.get_validation_errors()}")
             QMessageBox.warning(
                 self,
                 "Validation Error",
+                "Please correct the validation errors before saving."
+            )
+    
+    def on_form_save_requested(self, data):
+        """Handle save request from form."""
+        logger.debug("Form save requested with data")
+        # Form is requesting save, accept the dialog if valid
+        if self.person_form.is_form_valid():
+            logger.debug("Form is valid, accepting dialog from form save request")
+            self.accept()
+        else:
+            logger.debug(f"Form validation failed in save request: {self.person_form.get_validation_errors()}")
+            QMessageBox.warning(
+                self,
+                "Validation Error", 
                 "Please correct the validation errors before saving."
             )
     
@@ -209,8 +236,9 @@ class PeopleView(QWidget):
     
     def create_search_section(self):
         """Create the search section."""
-        # Define searchable fields
+        # Define searchable fields - expanded to include all relevant fields
         field_definitions = {
+            # Basic Information
             'first_name': {
                 'label': 'First Name',
                 'type': 'text'
@@ -219,12 +247,31 @@ class PeopleView(QWidget):
                 'label': 'Last Name',
                 'type': 'text'
             },
+            'title': {
+                'label': 'Title',
+                'type': 'choice',
+                'choices': ['Mr.', 'Ms.', 'Mrs.', 'Dr.', 'Prof.']
+            },
+            'suffix': {
+                'label': 'Suffix',
+                'type': 'text'
+            },
+            
+            # Contact Information
             'email': {
                 'label': 'Email',
                 'type': 'text'
             },
             'phone': {
                 'label': 'Phone',
+                'type': 'text'
+            },
+            'mobile': {
+                'label': 'Mobile',
+                'type': 'text'
+            },
+            'address': {
+                'label': 'Address',
                 'type': 'text'
             },
             'city': {
@@ -235,10 +282,16 @@ class PeopleView(QWidget):
                 'label': 'State',
                 'type': 'text'
             },
+            'zip_code': {
+                'label': 'ZIP Code',
+                'type': 'text'
+            },
             'country': {
                 'label': 'Country',
                 'type': 'text'
             },
+            
+            # Personal Information
             'date_of_birth': {
                 'label': 'Date of Birth',
                 'type': 'date'
@@ -247,6 +300,31 @@ class PeopleView(QWidget):
                 'label': 'Gender',
                 'type': 'choice',
                 'choices': ['Male', 'Female', 'Other', 'Prefer not to say']
+            },
+            'marital_status': {
+                'label': 'Marital Status',
+                'type': 'choice',
+                'choices': ['Single', 'Married', 'Divorced', 'Widowed', 'Separated']
+            },
+            
+            # Emergency Contact
+            'emergency_contact_name': {
+                'label': 'Emergency Contact Name',
+                'type': 'text'
+            },
+            'emergency_contact_phone': {
+                'label': 'Emergency Contact Phone',
+                'type': 'text'
+            },
+            
+            # Additional Information
+            'notes': {
+                'label': 'Notes',
+                'type': 'text'
+            },
+            'tags': {
+                'label': 'Tags',
+                'type': 'text'
             },
             'status': {
                 'label': 'Status',
@@ -260,15 +338,40 @@ class PeopleView(QWidget):
     
     def create_table_section(self):
         """Create the data table section."""
-        # Define table columns
+        # Define table columns - displaying ALL database fields
         columns = [
+            # Basic Information
+            ColumnConfig('id', 'ID', 100),
+            ColumnConfig('title', 'Title', 60),
             ColumnConfig('first_name', 'First Name', 120),
             ColumnConfig('last_name', 'Last Name', 120),
+            ColumnConfig('suffix', 'Suffix', 60),
+            
+            # Contact Information
             ColumnConfig('email', 'Email', 200),
             ColumnConfig('phone', 'Phone', 120),
+            ColumnConfig('mobile', 'Mobile', 120),
+            ColumnConfig('address', 'Address', 150),
             ColumnConfig('city', 'City', 100),
             ColumnConfig('state', 'State', 80),
+            ColumnConfig('zip_code', 'ZIP Code', 80),
+            ColumnConfig('country', 'Country', 100),
+            
+            # Personal Information
+            ColumnConfig('date_of_birth', 'Date of Birth', 120, formatter=self.format_date),
+            ColumnConfig('gender', 'Gender', 80),
+            ColumnConfig('marital_status', 'Marital Status', 120),
+            
+            # Emergency Contact
+            ColumnConfig('emergency_contact_name', 'Emergency Contact', 150),
+            ColumnConfig('emergency_contact_phone', 'Emergency Phone', 120),
+            
+            # Additional Information
+            ColumnConfig('notes', 'Notes', 200, formatter=self.format_notes),
+            ColumnConfig('tags', 'Tags', 150, formatter=self.format_tags),
             ColumnConfig('status', 'Status', 80),
+            
+            # System Information
             ColumnConfig('created_at', 'Created', 120, formatter=self.format_datetime),
             ColumnConfig('updated_at', 'Modified', 120, formatter=self.format_datetime),
         ]
@@ -307,6 +410,54 @@ class PeopleView(QWidget):
             
             return dt.strftime('%Y-%m-%d %H:%M')
         except (ValueError, TypeError):
+            return str(value)
+    
+    def format_date(self, value: Any) -> str:
+        """Format date for display."""
+        if not value:
+            return ""
+        
+        try:
+            if isinstance(value, str):
+                # Handle different date formats
+                if '-' in value and len(value.split('-')[0]) == 4:  # ISO format
+                    dt = datetime.fromisoformat(value).date()
+                else:  # dd-mm-yyyy format
+                    dt = datetime.strptime(value, '%d-%m-%Y').date()
+                return dt.strftime('%d-%m-%Y')
+            else:
+                return value.strftime('%d-%m-%Y')
+        except (ValueError, TypeError):
+            return str(value)
+    
+    def format_notes(self, value: Any) -> str:
+        """Format notes for display (truncate if too long)."""
+        if not value:
+            return ""
+        
+        text = str(value).strip()
+        if len(text) > 100:
+            return text[:97] + "..."
+        return text
+    
+    def format_tags(self, value: Any) -> str:
+        """Format tags for display."""
+        if not value:
+            return ""
+        
+        try:
+            if isinstance(value, str):
+                import json
+                tags = json.loads(value)
+                if isinstance(tags, list):
+                    return ", ".join(tags)
+                else:
+                    return str(value)
+            elif isinstance(value, list):
+                return ", ".join(str(tag) for tag in value)
+            else:
+                return str(value)
+        except (json.JSONDecodeError, TypeError):
             return str(value)
     
     def refresh_data(self):
@@ -366,8 +517,12 @@ class PeopleView(QWidget):
         
         # Handle quick search
         if search_filter.field == '_quick_search':
-            # Search across multiple fields
-            search_fields = ['first_name', 'last_name', 'email', 'phone', 'city', 'state']
+            # Search across multiple key fields
+            search_fields = [
+                'first_name', 'last_name', 'title', 'suffix', 'email', 
+                'phone', 'mobile', 'city', 'state', 'country',
+                'emergency_contact_name', 'notes', 'tags'
+            ]
             query = str(filter_value).lower()
             
             return any(
@@ -462,11 +617,15 @@ class PeopleView(QWidget):
     
     def add_person(self):
         """Add a new person."""
+        logger.debug("Opening add person dialog")
         dialog = PersonDialog(parent=self)
         
         if dialog.exec() == QDialog.Accepted:
             person_data = dialog.get_form_data()
+            logger.debug(f"Creating new person: {person_data.get('first_name')} {person_data.get('last_name')}")
             self.api_service.create_person_async(person_data)
+        else:
+            logger.debug("Add person dialog cancelled")
     
     def edit_person(self):
         """Edit the selected person."""

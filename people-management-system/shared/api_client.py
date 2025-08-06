@@ -6,8 +6,8 @@ the People Management System API, with support for authentication,
 error handling, pagination, and all API operations.
 """
 
-import asyncio
 import logging
+import re
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
@@ -15,11 +15,48 @@ from urllib.parse import urljoin
 import httpx
 from pydantic import BaseModel, Field
 
-from .models.response import APIResponse, PaginatedResponse, ErrorResponse
+from .models.response import APIResponse, PaginatedResponse
 
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+class APIKeyValidationError(ValueError):
+    """Raised when API key validation fails."""
+    pass
+
+
+def validate_api_key(api_key: str) -> bool:
+    """
+    Validate API key format for HTTP header use.
+    
+    Args:
+        api_key: The API key to validate
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    if not api_key or not isinstance(api_key, str):
+        return False
+    
+    # Check for newlines or carriage returns (HTTP header killers)
+    if '\n' in api_key or '\r' in api_key:
+        return False
+    
+    # Check for other control characters that could break HTTP headers
+    if any(ord(char) < 32 for char in api_key if char not in '\t'):
+        return False
+    
+    # Check for reasonable length (API keys are typically 20-128 characters)
+    if len(api_key.strip()) < 10 or len(api_key.strip()) > 256:
+        return False
+    
+    # Basic format check - should contain alphanumeric chars and possibly hyphens/underscores
+    if not re.match(r'^[a-zA-Z0-9\-_\.]+$', api_key.strip()):
+        return False
+    
+    return True
 
 
 class APIClientError(Exception):
@@ -97,8 +134,22 @@ class PersonData(BaseModel):
     last_name: str
     email: str
     phone: Optional[str] = None
+    mobile: Optional[str] = None
     date_of_birth: Optional[str] = None
     address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    country: Optional[str] = None
+    gender: Optional[str] = None
+    marital_status: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+    status: Optional[str] = None
+    title: Optional[str] = None
+    suffix: Optional[str] = None
 
 
 class DepartmentData(BaseModel):
@@ -136,8 +187,8 @@ class PeopleManagementClient:
     """
     Comprehensive client for the People Management System API.
     
-    Provides methods for all API operations with proper error handling,
-    authentication, pagination, and retry logic.
+    Uses synchronous HTTP client for better Qt compatibility and to avoid
+    event loop management issues.
     """
     
     def __init__(self, config: Union[ClientConfig, Dict[str, Any]]):
@@ -145,9 +196,10 @@ class PeopleManagementClient:
             config = ClientConfig(**config)
         
         self.config = config
-        self._client = httpx.AsyncClient(
+        self._client = httpx.Client(
             timeout=config.timeout,
             verify=config.verify_ssl,
+            follow_redirects=True,  # Automatically follow redirects
             headers={
                 "User-Agent": config.user_agent,
                 "Content-Type": "application/json"
@@ -155,6 +207,13 @@ class PeopleManagementClient:
         )
         
         if config.api_key:
+            # Validate API key before setting as header
+            if not validate_api_key(config.api_key):
+                raise APIKeyValidationError(
+                    f"Invalid API key format: API key contains illegal characters for HTTP headers. "
+                    f"API keys should contain only alphanumeric characters, hyphens, underscores, and dots, "
+                    f"and must not contain newlines or control characters."
+                )
             self._client.headers["X-API-Key"] = config.api_key
         
         self._session_stats = {
@@ -164,17 +223,17 @@ class PeopleManagementClient:
             "session_start": time.time()
         }
     
-    async def __aenter__(self):
-        """Async context manager entry."""
+    def __enter__(self):
+        """Context manager entry."""
         return self
     
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.close()
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.close()
     
-    async def close(self):
+    def close(self):
         """Close the HTTP client."""
-        await self._client.aclose()
+        self._client.close()
     
     def _build_url(self, endpoint: str) -> str:
         """Build full URL from endpoint."""
@@ -182,7 +241,7 @@ class PeopleManagementClient:
             endpoint = endpoint[1:]
         return urljoin(self.config.base_url.rstrip("/") + "/", endpoint)
     
-    async def _request(
+    def _request(
         self,
         method: str,
         endpoint: str,
@@ -197,7 +256,7 @@ class PeopleManagementClient:
         
         for attempt in range(self.config.max_retries + 1):
             try:
-                response = await self._client.request(
+                response = self._client.request(
                     method=method,
                     url=url,
                     params=params,
@@ -210,7 +269,7 @@ class PeopleManagementClient:
                     return response.json()
                 
                 # Handle error responses
-                await self._handle_error_response(response)
+                self._handle_error_response(response)
                 
             except httpx.RequestError as e:
                 logger.warning(f"Request error on attempt {attempt + 1}: {e}")
@@ -218,21 +277,21 @@ class PeopleManagementClient:
                     self._session_stats["errors_encountered"] += 1
                     raise APIClientError(f"Request failed after {self.config.max_retries} retries: {e}")
                 
-                await asyncio.sleep(self.config.retry_delay * (attempt + 1))
+                time.sleep(self.config.retry_delay * (attempt + 1))
             
             except httpx.HTTPStatusError as e:
                 # Don't retry on client errors (4xx)
                 if 400 <= e.response.status_code < 500:
-                    await self._handle_error_response(e.response)
+                    self._handle_error_response(e.response)
                 
                 logger.warning(f"HTTP error on attempt {attempt + 1}: {e}")
                 if attempt == self.config.max_retries:
                     self._session_stats["errors_encountered"] += 1
                     raise APIClientError(f"HTTP error: {e}")
                 
-                await asyncio.sleep(self.config.retry_delay * (attempt + 1))
+                time.sleep(self.config.retry_delay * (attempt + 1))
     
-    async def _handle_error_response(self, response: httpx.Response) -> None:
+    def _handle_error_response(self, response: httpx.Response) -> None:
         """Handle error responses and raise appropriate exceptions."""
         self._session_stats["errors_encountered"] += 1
         
@@ -260,36 +319,36 @@ class PeopleManagementClient:
     
     # Health and Status endpoints
     
-    async def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> Dict[str, Any]:
         """Check API health status."""
-        return await self._request("GET", "/health")
+        return self._request("GET", "health")
     
-    async def get_version(self) -> Dict[str, Any]:
+    def get_version(self) -> Dict[str, Any]:
         """Get API version information."""
-        return await self._request("GET", "/version")
+        return self._request("GET", "/version/")
     
-    async def get_api_info(self) -> Dict[str, Any]:
+    def get_api_info(self) -> Dict[str, Any]:
         """Get API information and capabilities."""
-        return await self._request("GET", "/api/v1/")
+        return self._request("GET", "/api/v1/")
     
     # People endpoints
     
-    async def create_person(self, person_data: Union[PersonData, Dict[str, Any]]) -> Dict[str, Any]:
+    def create_person(self, person_data: Union[PersonData, Dict[str, Any]]) -> Dict[str, Any]:
         """Create a new person."""
         if isinstance(person_data, PersonData):
             person_data = person_data.dict()
         
-        return await self._request("POST", "/api/v1/people", json_data=person_data)
+        return self._request("POST", "/api/v1/people/", json_data=person_data)
     
-    async def get_person(self, person_id: str) -> Dict[str, Any]:
+    def get_person(self, person_id: str) -> Dict[str, Any]:
         """Get person by ID."""
-        return await self._request("GET", f"/api/v1/people/{person_id}")
+        return self._request("GET", f"/api/v1/people/{person_id}/")
     
-    async def get_person_by_email(self, email: str) -> Dict[str, Any]:
+    def get_person_by_email(self, email: str) -> Dict[str, Any]:
         """Get person by email address."""
-        return await self._request("GET", f"/api/v1/people/by-email/{email}")
+        return self._request("GET", f"/api/v1/people/by-email/{email}/")
     
-    async def list_people(
+    def list_people(
         self,
         pagination: Optional[Union[PaginationParams, Dict[str, Any]]] = None,
         search: Optional[Union[SearchParams, Dict[str, Any]]] = None,
@@ -316,20 +375,20 @@ class PeopleManagementClient:
         if active_only is not None:
             params["active"] = "true" if active_only else "false"
         
-        return await self._request("GET", "/api/v1/people", params=params)
+        return self._request("GET", "/api/v1/people/", params=params)
     
-    async def update_person(self, person_id: str, person_data: Union[PersonData, Dict[str, Any]]) -> Dict[str, Any]:
+    def update_person(self, person_id: str, person_data: Union[PersonData, Dict[str, Any]]) -> Dict[str, Any]:
         """Update person information."""
         if isinstance(person_data, PersonData):
             person_data = person_data.dict(exclude_unset=True)
         
-        return await self._request("PUT", f"/api/v1/people/{person_id}", json_data=person_data)
+        return self._request("PUT", f"/api/v1/people/{person_id}/", json_data=person_data)
     
-    async def delete_person(self, person_id: str) -> Dict[str, Any]:
+    def delete_person(self, person_id: str) -> Dict[str, Any]:
         """Delete a person."""
-        return await self._request("DELETE", f"/api/v1/people/{person_id}")
+        return self._request("DELETE", f"/api/v1/people/{person_id}/")
     
-    async def bulk_create_people(self, people_data: List[Union[PersonData, Dict[str, Any]]]) -> Dict[str, Any]:
+    def bulk_create_people(self, people_data: List[Union[PersonData, Dict[str, Any]]]) -> Dict[str, Any]:
         """Create multiple people in bulk."""
         people_list = []
         for person in people_data:
@@ -338,22 +397,22 @@ class PeopleManagementClient:
             else:
                 people_list.append(person)
         
-        return await self._request("POST", "/api/v1/people/bulk", json_data={"people": people_list})
+        return self._request("POST", "/api/v1/people/bulk/", json_data={"people": people_list})
     
     # Department endpoints
     
-    async def create_department(self, department_data: Union[DepartmentData, Dict[str, Any]]) -> Dict[str, Any]:
+    def create_department(self, department_data: Union[DepartmentData, Dict[str, Any]]) -> Dict[str, Any]:
         """Create a new department."""
         if isinstance(department_data, DepartmentData):
             department_data = department_data.dict()
         
-        return await self._request("POST", "/api/v1/departments", json_data=department_data)
+        return self._request("POST", "/api/v1/departments/", json_data=department_data)
     
-    async def get_department(self, department_id: str) -> Dict[str, Any]:
+    def get_department(self, department_id: str) -> Dict[str, Any]:
         """Get department by ID."""
-        return await self._request("GET", f"/api/v1/departments/{department_id}")
+        return self._request("GET", f"/api/v1/departments/{department_id}/")
     
-    async def list_departments(
+    def list_departments(
         self,
         pagination: Optional[Union[PaginationParams, Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
@@ -365,33 +424,33 @@ class PeopleManagementClient:
             else:
                 params.update(pagination)
         
-        return await self._request("GET", "/api/v1/departments", params=params)
+        return self._request("GET", "/api/v1/departments/", params=params)
     
-    async def update_department(self, department_id: str, department_data: Union[DepartmentData, Dict[str, Any]]) -> Dict[str, Any]:
+    def update_department(self, department_id: str, department_data: Union[DepartmentData, Dict[str, Any]]) -> Dict[str, Any]:
         """Update department information."""
         if isinstance(department_data, DepartmentData):
             department_data = department_data.dict(exclude_unset=True)
         
-        return await self._request("PUT", f"/api/v1/departments/{department_id}", json_data=department_data)
+        return self._request("PUT", f"/api/v1/departments/{department_id}/", json_data=department_data)
     
-    async def delete_department(self, department_id: str) -> Dict[str, Any]:
+    def delete_department(self, department_id: str) -> Dict[str, Any]:
         """Delete a department."""
-        return await self._request("DELETE", f"/api/v1/departments/{department_id}")
+        return self._request("DELETE", f"/api/v1/departments/{department_id}/")
     
     # Position endpoints
     
-    async def create_position(self, position_data: Union[PositionData, Dict[str, Any]]) -> Dict[str, Any]:
+    def create_position(self, position_data: Union[PositionData, Dict[str, Any]]) -> Dict[str, Any]:
         """Create a new position."""
         if isinstance(position_data, PositionData):
             position_data = position_data.dict()
         
-        return await self._request("POST", "/api/v1/positions", json_data=position_data)
+        return self._request("POST", "/api/v1/positions/", json_data=position_data)
     
-    async def get_position(self, position_id: str) -> Dict[str, Any]:
+    def get_position(self, position_id: str) -> Dict[str, Any]:
         """Get position by ID."""
-        return await self._request("GET", f"/api/v1/positions/{position_id}")
+        return self._request("GET", f"/api/v1/positions/{position_id}/")
     
-    async def list_positions(
+    def list_positions(
         self,
         pagination: Optional[Union[PaginationParams, Dict[str, Any]]] = None,
         department_id: Optional[str] = None
@@ -407,33 +466,33 @@ class PeopleManagementClient:
         if department_id:
             params["department_id"] = department_id
         
-        return await self._request("GET", "/api/v1/positions", params=params)
+        return self._request("GET", "/api/v1/positions/", params=params)
     
-    async def update_position(self, position_id: str, position_data: Union[PositionData, Dict[str, Any]]) -> Dict[str, Any]:
+    def update_position(self, position_id: str, position_data: Union[PositionData, Dict[str, Any]]) -> Dict[str, Any]:
         """Update position information."""
         if isinstance(position_data, PositionData):
             position_data = position_data.dict(exclude_unset=True)
         
-        return await self._request("PUT", f"/api/v1/positions/{position_id}", json_data=position_data)
+        return self._request("PUT", f"/api/v1/positions/{position_id}/", json_data=position_data)
     
-    async def delete_position(self, position_id: str) -> Dict[str, Any]:
+    def delete_position(self, position_id: str) -> Dict[str, Any]:
         """Delete a position."""
-        return await self._request("DELETE", f"/api/v1/positions/{position_id}")
+        return self._request("DELETE", f"/api/v1/positions/{position_id}/")
     
     # Employment endpoints
     
-    async def create_employment(self, employment_data: Union[EmploymentData, Dict[str, Any]]) -> Dict[str, Any]:
+    def create_employment(self, employment_data: Union[EmploymentData, Dict[str, Any]]) -> Dict[str, Any]:
         """Create a new employment record."""
         if isinstance(employment_data, EmploymentData):
             employment_data = employment_data.dict()
         
-        return await self._request("POST", "/api/v1/employment", json_data=employment_data)
+        return self._request("POST", "/api/v1/employment/", json_data=employment_data)
     
-    async def get_employment(self, employment_id: str) -> Dict[str, Any]:
+    def get_employment(self, employment_id: str) -> Dict[str, Any]:
         """Get employment record by ID."""
-        return await self._request("GET", f"/api/v1/employment/{employment_id}")
+        return self._request("GET", f"/api/v1/employment/{employment_id}/")
     
-    async def list_employment(
+    def list_employment(
         self,
         pagination: Optional[Union[PaginationParams, Dict[str, Any]]] = None,
         person_id: Optional[str] = None,
@@ -455,32 +514,32 @@ class PeopleManagementClient:
         if active_only is not None:
             params["active"] = "true" if active_only else "false"
         
-        return await self._request("GET", "/api/v1/employment", params=params)
+        return self._request("GET", "/api/v1/employment/", params=params)
     
-    async def update_employment(self, employment_id: str, employment_data: Union[EmploymentData, Dict[str, Any]]) -> Dict[str, Any]:
+    def update_employment(self, employment_id: str, employment_data: Union[EmploymentData, Dict[str, Any]]) -> Dict[str, Any]:
         """Update employment record."""
         if isinstance(employment_data, EmploymentData):
             employment_data = employment_data.dict(exclude_unset=True)
         
-        return await self._request("PUT", f"/api/v1/employment/{employment_id}", json_data=employment_data)
+        return self._request("PUT", f"/api/v1/employment/{employment_id}/", json_data=employment_data)
     
-    async def end_employment(self, employment_id: str, end_date: Optional[str] = None) -> Dict[str, Any]:
+    def end_employment(self, employment_id: str, end_date: Optional[str] = None) -> Dict[str, Any]:
         """End an employment record."""
         data = {
             "is_active": False,
             "end_date": end_date or datetime.utcnow().isoformat()
         }
-        return await self._request("PATCH", f"/api/v1/employment/{employment_id}", json_data=data)
+        return self._request("PATCH", f"/api/v1/employment/{employment_id}/", json_data=data)
     
     # Statistics endpoints
     
-    async def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> Dict[str, Any]:
         """Get system statistics."""
-        return await self._request("GET", "/api/v1/statistics")
+        return self._request("GET", "/api/v1/statistics/overview")
     
-    async def get_department_statistics(self, department_id: str) -> Dict[str, Any]:
+    def get_department_statistics(self, department_id: str) -> Dict[str, Any]:
         """Get statistics for a specific department."""
-        return await self._request("GET", f"/api/v1/statistics/departments/{department_id}")
+        return self._request("GET", f"/api/v1/statistics/departments/{department_id}/")
     
     # Utility methods
     
@@ -496,56 +555,46 @@ class PeopleManagementClient:
             "error_rate": self._session_stats["errors_encountered"] / max(1, self._session_stats["requests_made"])
         }
     
-    async def test_connection(self) -> bool:
-        """Test API connection and authentication."""
+    def test_connection(self) -> bool:
+        """Test API connection and authentication with fallbacks."""
+        # Try health endpoint first (most lightweight)
         try:
-            await self.health_check()
+            self.health_check()
+            logger.info("Connection test successful via health endpoint")
             return True
-        except Exception as e:
-            logger.error(f"Connection test failed: {e}")
+        except Exception as health_error:
+            logger.debug(f"Health check failed: {health_error}, trying fallbacks...")
+        
+        # Try API info endpoint as fallback
+        try:
+            self.get_api_info()
+            logger.info("Connection test successful via API info endpoint")
+            return True
+        except Exception as api_info_error:
+            logger.debug(f"API info check failed: {api_info_error}, trying version endpoint...")
+        
+        # Try version endpoint as another fallback
+        try:
+            self.get_version()
+            logger.info("Connection test successful via version endpoint")
+            return True
+        except Exception as version_error:
+            logger.debug(f"Version check failed: {version_error}, trying basic API test...")
+        
+        # Try a simple API endpoint (like listing people with limit 1) as last fallback
+        try:
+            self.list_people(pagination=PaginationParams(page=1, size=1))
+            logger.info("Connection test successful via people list endpoint")
+            return True
+        except Exception as people_error:
+            logger.error(f"All connection tests failed. Last error: {people_error}")
             return False
 
 
-# Synchronous wrapper for compatibility
-class SyncPeopleManagementClient:
-    """Synchronous wrapper for the async PeopleManagementClient."""
-    
-    def __init__(self, config: Union[ClientConfig, Dict[str, Any]]):
-        self._async_client = PeopleManagementClient(config)
-    
-    def _run_async(self, coro):
-        """Run async coroutine synchronously."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
-    
-    def __enter__(self):
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-    
-    def close(self):
-        """Close the client."""
-        self._run_async(self._async_client.close())
-    
-    # Wrap all async methods
-    def health_check(self) -> Dict[str, Any]:
-        return self._run_async(self._async_client.health_check())
-    
-    def create_person(self, person_data: Union[PersonData, Dict[str, Any]]) -> Dict[str, Any]:
-        return self._run_async(self._async_client.create_person(person_data))
-    
-    def get_person(self, person_id: str) -> Dict[str, Any]:
-        return self._run_async(self._async_client.get_person(person_id))
-    
-    def list_people(self, **kwargs) -> Dict[str, Any]:
-        return self._run_async(self._async_client.list_people(**kwargs))
-    
-    # Add other methods as needed...
+# Synchronous wrapper for compatibility (now just an alias)
+class SyncPeopleManagementClient(PeopleManagementClient):
+    """Synchronous client for the People Management System API (alias for compatibility)."""
+    pass
 
 
 # Convenience functions
@@ -563,10 +612,10 @@ def create_sync_client(
     base_url: str,
     api_key: Optional[str] = None,
     **kwargs
-) -> SyncPeopleManagementClient:
+) -> PeopleManagementClient:
     """Create a sync API client with default configuration."""
     config = ClientConfig(base_url=base_url, api_key=api_key, **kwargs)
-    return SyncPeopleManagementClient(config)
+    return PeopleManagementClient(config)
 
 
 # Export public interface

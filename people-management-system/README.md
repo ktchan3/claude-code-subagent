@@ -8,42 +8,72 @@ A comprehensive client-server application for managing people, departments, posi
 
 - Python 3.9 or higher
 - UV (Python package installer and project manager)
+- Git (for cloning the repository)
 
 ### Installation
 
-1. Clone the repository:
+1. **Clone the repository**:
 ```bash
 git clone <repository-url>
 cd people-management-system
 ```
 
-2. Install dependencies:
+2. **Install UV** (if not already installed):
+```bash
+# On macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# On Windows (PowerShell)
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Verify installation
+uv --version
+```
+
+3. **Install dependencies**:
 ```bash
 make dev-install
 # or manually: uv sync
 ```
 
-3. Set up the database:
+4. **Set up the database**:
 ```bash
 make setup-db
 # or manually: uv run alembic upgrade head
 ```
 
-4. Run the application:
+5. **Set up development tools** (optional but recommended):
+```bash
+# Install pre-commit hooks
+uv run pre-commit install
+```
 
-**Start the server:**
+### Running the Application
+
+1. **Start the server** (in one terminal):
 ```bash
 make run-server
 # or manually: uv run uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Start the client (in a separate terminal):**
+2. **Start the client** (in a separate terminal):
 ```bash
 make run-client
 # or manually: uv run python -m client.main
 ```
 
-The API will be available at `http://localhost:8000` with interactive documentation at `http://localhost:8000/docs`.
+3. **Access the application**:
+   - **API**: `http://localhost:8000`
+   - **Interactive API docs**: `http://localhost:8000/docs`
+   - **GUI Client**: Launches automatically
+
+### Default Login Credentials
+
+For the client application:
+- **Server URL**: `http://localhost:8000`
+- **API Key**: `dev-admin-key-12345` (development only)
+
+Note: API key authentication is optional for most endpoints.
 
 ## 📋 Overview
 
@@ -234,9 +264,21 @@ make reset-db
 ## 📚 Documentation
 
 - **[Architecture Guide](docs/ARCHITECTURE.md)**: Detailed system architecture and design decisions
-- **[Development Guide](docs/DEVELOPMENT.md)**: Setup, workflows, and contribution guidelines
+- **[Development Guide](docs/DEVELOPMENT.md)**: Setup, workflows, contribution guidelines, and critical bug fixes
+- **[API Reference](docs/API.md)**: Complete API documentation with examples and field specifications
+- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)**: Common issues and their solutions
 - **[Deployment Guide](docs/DEPLOYMENT.md)**: Production deployment and configuration
-- **[API Reference](docs/API.md)**: Complete API documentation and examples
+- **[Changelog](CHANGELOG.md)**: Version history and important fixes
+
+### Recent Updates
+
+**🔧 Critical Bug Fixes Applied** (v1.0.1):
+- ✅ **Person Field Saving**: Fixed issue where optional fields (Title, Suffix) weren't being saved properly
+- ✅ **Date Constraints**: Resolved SQLite date constraint errors 
+- ✅ **Client Stability**: Fixed shutdown errors and Qt deprecation warnings
+- ✅ **API Validation**: Enhanced schema validation and error handling
+
+See [CHANGELOG.md](CHANGELOG.md) for complete details and [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for resolved issues.
 
 ## 🖼️ Screenshots
 

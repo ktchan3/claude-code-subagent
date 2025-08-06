@@ -5,8 +5,8 @@ Handles application configuration, user preferences, and secure credential stora
 """
 
 import json
-import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
 from dataclasses import dataclass, asdict
@@ -14,9 +14,80 @@ from datetime import datetime
 
 import keyring
 from platformdirs import user_config_dir, user_data_dir
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
+
+
+class APIKeyValidationError(ValueError):
+    """Raised when API key validation fails."""
+    pass
+
+
+def validate_api_key(api_key: str) -> bool:
+    """
+    Validate API key format.
+    
+    Args:
+        api_key: The API key to validate
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    if not api_key or not isinstance(api_key, str):
+        return False
+    
+    # Check for newlines or carriage returns (HTTP header killers)
+    if '\n' in api_key or '\r' in api_key:
+        return False
+    
+    # Check for other control characters that could break HTTP headers
+    if any(ord(char) < 32 for char in api_key if char not in '\t'):
+        return False
+    
+    # Check for reasonable length (API keys are typically 20-128 characters)
+    if len(api_key.strip()) < 10 or len(api_key.strip()) > 256:
+        return False
+    
+    # Basic format check - should contain alphanumeric chars and possibly hyphens/underscores
+    if not re.match(r'^[a-zA-Z0-9\-_\.]+$', api_key.strip()):
+        return False
+    
+    return True
+
+
+def sanitize_api_key(api_key: str) -> str:
+    """
+    Sanitize API key by removing invalid characters.
+    
+    Args:
+        api_key: The API key to sanitize
+        
+    Returns:
+        Sanitized API key
+        
+    Raises:
+        APIKeyValidationError: If the key cannot be sanitized to a valid format
+    """
+    if not api_key or not isinstance(api_key, str):
+        raise APIKeyValidationError("API key must be a non-empty string")
+    
+    # Strip whitespace and remove newlines/carriage returns
+    sanitized = api_key.strip().replace('\n', '').replace('\r', '')
+    
+    # Remove any control characters except tab (though tab shouldn't be in API keys)
+    sanitized = ''.join(char for char in sanitized if ord(char) >= 32 or char == '\t')
+    
+    # Remove tabs as well since they shouldn't be in API keys
+    sanitized = sanitized.replace('\t', '')
+    
+    if not validate_api_key(sanitized):
+        raise APIKeyValidationError(
+            f"API key contains invalid characters or format. "
+            f"API keys should contain only alphanumeric characters, hyphens, underscores, and dots."
+        )
+    
+    return sanitized
 
 
 class ConnectionConfig(BaseModel):
@@ -27,7 +98,8 @@ class ConnectionConfig(BaseModel):
     timeout: float = Field(30.0, description="Request timeout in seconds")
     verify_ssl: bool = Field(True, description="Verify SSL certificates")
     
-    @validator('base_url')
+    @field_validator('base_url')
+    @classmethod
     def validate_base_url(cls, v):
         if not v.startswith(('http://', 'https://')):
             raise ValueError('Base URL must start with http:// or https://')
@@ -85,17 +157,25 @@ class ConfigService:
         logger.info(f"Config directory: {self.config_dir}")
         logger.info(f"Data directory: {self.data_dir}")
     
-    async def initialize(self):
+    def initialize(self):
         """Initialize the configuration service."""
         # Create directories if they don't exist
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
         # Load existing configuration
-        await self.load_config()
-        await self.load_recent_connections()
+        self.load_config()
+        self.load_recent_connections()
+        
+        # Automatically clean up any corrupted API keys on initialization
+        try:
+            cleared_count = self.clear_corrupted_api_keys()
+            if cleared_count > 0:
+                logger.warning(f"Automatically cleared {cleared_count} corrupted API key(s) on startup")
+        except Exception as e:
+            logger.error(f"Error clearing corrupted API keys on startup: {e}")
     
-    async def load_config(self) -> Optional[Dict[str, Any]]:
+    def load_config(self) -> Optional[Dict[str, Any]]:
         """Load configuration from file."""
         try:
             if self.config_file.exists():
@@ -121,7 +201,7 @@ class ConfigService:
         
         return None
     
-    async def save_config(self, config: Optional[Union[ApplicationConfig, Dict[str, Any]]] = None):
+    def save_config(self, config: Optional[Union[ApplicationConfig, Dict[str, Any]]] = None):
         """Save configuration to file."""
         try:
             if config is None:
@@ -143,6 +223,17 @@ class ConfigService:
                 
                 if api_key and base_url:
                     try:
+                        # Validate and sanitize the API key before saving
+                        if not validate_api_key(api_key):
+                            try:
+                                api_key = sanitize_api_key(api_key)
+                                logger.warning("API key was sanitized during config save")
+                            except APIKeyValidationError as e:
+                                logger.error(f"Invalid API key format during config save: {e}")
+                                # Don't save invalid API keys
+                                config_dict['connection']['api_key'] = None
+                                return
+                        
                         keyring.set_password(self.SERVICE_NAME, base_url, api_key)
                         # Remove API key from config file for security
                         config_dict['connection']['api_key'] = None
@@ -162,7 +253,7 @@ class ConfigService:
             logger.error(f"Failed to save configuration: {e}")
             raise
     
-    async def load_recent_connections(self) -> list[RecentConnection]:
+    def load_recent_connections(self) -> list[RecentConnection]:
         """Load recent connections from file."""
         try:
             if self.recent_connections_file.exists():
@@ -193,7 +284,7 @@ class ConfigService:
         
         return self._recent_connections
     
-    async def save_recent_connections(self):
+    def save_recent_connections(self):
         """Save recent connections to file."""
         try:
             connections_data = [
@@ -214,7 +305,7 @@ class ConfigService:
         except Exception as e:
             logger.error(f"Failed to save recent connections: {e}")
     
-    async def add_recent_connection(self, name: str, base_url: str, successful: bool = True):
+    def add_recent_connection(self, name: str, base_url: str, successful: bool = True):
         """Add a connection to the recent connections list."""
         # Remove existing connection with same URL
         self._recent_connections = [
@@ -234,7 +325,7 @@ class ConfigService:
         # Limit to 10 connections
         self._recent_connections = self._recent_connections[:10]
         
-        await self.save_recent_connections()
+        self.save_recent_connections()
     
     def get_config(self) -> Optional[ApplicationConfig]:
         """Get current configuration."""
@@ -260,16 +351,16 @@ class ConfigService:
         """Get recent connections list."""
         return self._recent_connections.copy()
     
-    async def update_connection_config(self, connection_config: ConnectionConfig):
+    def update_connection_config(self, connection_config: ConnectionConfig):
         """Update connection configuration."""
         if self._config is None:
             self._config = ApplicationConfig(connection=connection_config)
         else:
             self._config.connection = connection_config
         
-        await self.save_config()
+        self.save_config()
     
-    async def update_ui_config(self, ui_config: UIConfig):
+    def update_ui_config(self, ui_config: UIConfig):
         """Update UI configuration."""
         if self._config is None:
             self._config = ApplicationConfig(
@@ -279,9 +370,9 @@ class ConfigService:
         else:
             self._config.ui = ui_config
         
-        await self.save_config()
+        self.save_config()
     
-    async def get_api_key(self, base_url: str) -> Optional[str]:
+    def get_api_key(self, base_url: str) -> Optional[str]:
         """Get API key for a specific base URL from keyring."""
         try:
             return keyring.get_password(self.SERVICE_NAME, base_url)
@@ -289,20 +380,62 @@ class ConfigService:
             logger.error(f"Failed to get API key from keyring: {e}")
             return None
     
-    async def set_api_key(self, base_url: str, api_key: str):
+    def set_api_key(self, base_url: str, api_key: str):
         """Set API key for a specific base URL in keyring."""
         try:
+            # Validate and sanitize the API key before saving
+            if not validate_api_key(api_key):
+                try:
+                    api_key = sanitize_api_key(api_key)
+                    logger.warning("API key was sanitized before saving")
+                except APIKeyValidationError as e:
+                    logger.error(f"Invalid API key format: {e}")
+                    raise ValueError(f"Invalid API key format: {e}")
+            
             keyring.set_password(self.SERVICE_NAME, base_url, api_key)
         except Exception as e:
             logger.error(f"Failed to set API key in keyring: {e}")
             raise
     
-    async def delete_api_key(self, base_url: str):
+    def delete_api_key(self, base_url: str):
         """Delete API key for a specific base URL from keyring."""
         try:
             keyring.delete_password(self.SERVICE_NAME, base_url)
         except Exception as e:
             logger.error(f"Failed to delete API key from keyring: {e}")
+    
+    def clear_corrupted_api_keys(self):
+        """Clear any corrupted API keys from the keyring."""
+        logger.info("Checking for and clearing corrupted API keys...")
+        
+        # Get all recent connections to check their API keys
+        recent_connections = self.get_recent_connections()
+        cleared_count = 0
+        
+        for conn in recent_connections:
+            try:
+                api_key = self.get_api_key(conn.base_url)
+                if api_key and not validate_api_key(api_key):
+                    logger.warning(f"Found corrupted API key for {conn.base_url}, clearing it")
+                    self.delete_api_key(conn.base_url)
+                    cleared_count += 1
+            except Exception as e:
+                logger.error(f"Error checking API key for {conn.base_url}: {e}")
+        
+        # Also check current config
+        if self._config and self._config.connection:
+            base_url = self._config.connection.base_url
+            try:
+                api_key = self.get_api_key(base_url)
+                if api_key and not validate_api_key(api_key):
+                    logger.warning(f"Found corrupted API key for current config {base_url}, clearing it")
+                    self.delete_api_key(base_url)
+                    cleared_count += 1
+            except Exception as e:
+                logger.error(f"Error checking current config API key: {e}")
+        
+        logger.info(f"Cleared {cleared_count} corrupted API keys")
+        return cleared_count
     
     def get_logs_directory(self) -> Path:
         """Get logs directory path."""
@@ -322,7 +455,7 @@ class ConfigService:
         exports_dir.mkdir(exist_ok=True)
         return exports_dir
     
-    async def clear_cache(self):
+    def clear_cache(self):
         """Clear application cache."""
         cache_dir = self.get_cache_directory()
         try:
@@ -333,7 +466,7 @@ class ConfigService:
         except Exception as e:
             logger.error(f"Failed to clear cache: {e}")
     
-    async def export_config(self, file_path: Union[str, Path]):
+    def export_config(self, file_path: Union[str, Path]):
         """Export configuration to a file."""
         if self._config is None:
             raise ValueError("No configuration to export")
@@ -348,12 +481,12 @@ class ConfigService:
         
         logger.info(f"Configuration exported to {file_path}")
     
-    async def import_config(self, file_path: Union[str, Path]):
+    def import_config(self, file_path: Union[str, Path]):
         """Import configuration from a file."""
         with open(file_path, 'r') as f:
             config_data = json.load(f)
         
         self._config = ApplicationConfig(**config_data)
-        await self.save_config()
+        self.save_config()
         
         logger.info(f"Configuration imported from {file_path}")

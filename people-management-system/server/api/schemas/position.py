@@ -7,7 +7,7 @@ operations including CRUD and relationships with departments and employees.
 
 from typing import List, Optional
 from uuid import UUID
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 
 from .common import BaseSchema, TimestampSchema, get_uuid_field, get_name_field, get_optional_text_field
 
@@ -27,7 +27,8 @@ class PositionCreate(PositionBase):
     
     department_id: UUID = get_uuid_field(description="Department ID this position belongs to")
     
-    @validator('title')
+    @field_validator('title')
+    @classmethod
     def validate_title(cls, v):
         """Validate position title."""
         if v:
@@ -60,7 +61,8 @@ class PositionUpdate(BaseSchema):
     )
     department_id: Optional[UUID] = Field(None, description="Department ID to move position to")
     
-    @validator('title')
+    @field_validator('title')
+    @classmethod
     def validate_title(cls, v):
         """Validate position title."""
         if v:
@@ -238,19 +240,21 @@ class PositionSearch(BaseSchema):
     min_salary: Optional[float] = Field(None, ge=0, description="Minimum average salary")
     max_salary: Optional[float] = Field(None, ge=0, description="Maximum average salary")
     
-    @validator('max_employees')
-    def validate_employee_range(cls, v, values):
+    @field_validator('max_employees')
+    @classmethod
+    def validate_employee_range(cls, v, info):
         """Validate that max_employees is greater than min_employees."""
-        if v is not None and 'min_employees' in values and values['min_employees'] is not None:
-            if v < values['min_employees']:
+        if v is not None and hasattr(info.data, 'min_employees') and info.data.min_employees is not None:
+            if v < info.data.min_employees:
                 raise ValueError('max_employees must be greater than or equal to min_employees')
         return v
     
-    @validator('max_salary')
-    def validate_salary_range(cls, v, values):
+    @field_validator('max_salary')
+    @classmethod
+    def validate_salary_range(cls, v, info):
         """Validate that max_salary is greater than min_salary."""
-        if v is not None and 'min_salary' in values and values['min_salary'] is not None:
-            if v < values['min_salary']:
+        if v is not None and hasattr(info.data, 'min_salary') and info.data.min_salary is not None:
+            if v < info.data.min_salary:
                 raise ValueError('max_salary must be greater than or equal to min_salary')
         return v
     
@@ -335,7 +339,8 @@ class PositionTransfer(BaseSchema):
         description="Effective date for the transfer (YYYY-MM-DD format)"
     )
     
-    @validator('effective_date')
+    @field_validator('effective_date')
+    @classmethod
     def validate_effective_date(cls, v):
         """Validate effective date format."""
         if v:
@@ -366,7 +371,8 @@ class PositionClone(BaseSchema):
     )
     copy_description: bool = Field(True, description="Whether to copy the description")
     
-    @validator('new_title')
+    @field_validator('new_title')
+    @classmethod
     def validate_title(cls, v):
         """Validate new position title."""
         if v:

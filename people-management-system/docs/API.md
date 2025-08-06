@@ -289,6 +289,40 @@ When rate limit is exceeded, a 429 status code is returned:
 
 Manage person records including personal information and employment history.
 
+### Important API Usage Notes
+
+#### Field Handling and Optional Parameters
+
+**Critical**: When creating or updating person records, the API properly handles optional fields. You should only include fields that you want to set. Omitted optional fields will not override existing values.
+
+**Correct Usage**:
+```json
+{
+  "first_name": "John",
+  "last_name": "Doe", 
+  "email": "john.doe@example.com",
+  "title": "Dr"
+}
+```
+
+**Field Exclusion Behavior**:
+- Optional fields that are not provided in the request will be ignored
+- Optional fields explicitly set to `null` will be stored as `null`
+- This prevents accidental data loss when updating partial records
+
+#### Date Format
+
+All date fields use DD-MM-YYYY format (e.g., "25-12-1990" for December 25, 1990).
+
+#### Tags Field
+
+The `tags` field accepts an array of strings for categorization:
+```json
+{
+  "tags": ["engineering", "senior", "team-lead"]
+}
+```
+
 ### List People
 
 ```http
@@ -432,14 +466,24 @@ Create a new person record.
 {
   "first_name": "Jane",
   "last_name": "Smith",
+  "title": "Dr",
+  "suffix": "PhD",
   "email": "jane.smith@example.com",
   "phone": "+1-555-987-6543",
-  "date_of_birth": "1985-06-20",
+  "mobile": "+1-555-987-6544",
+  "date_of_birth": "20-06-1985",
+  "gender": "Female",
+  "marital_status": "Single",
   "address": "456 Oak Ave",
   "city": "Springfield",
   "state": "IL",
   "zip_code": "62702",
-  "country": "United States"
+  "country": "United States",
+  "emergency_contact_name": "John Smith",
+  "emergency_contact_phone": "+1-555-123-4567",
+  "notes": "Software engineer with 5 years experience",
+  "tags": ["engineering", "senior"],
+  "status": "active"
 }
 ```
 
@@ -451,13 +495,23 @@ Create a new person record.
 
 #### Optional Fields
 
+- `title` (string, max 50 chars) - Professional title (e.g., "Dr", "Mr", "Ms")
+- `suffix` (string, max 20 chars) - Name suffix (e.g., "Jr", "Sr", "PhD")
 - `phone` (string, valid phone format)
-- `date_of_birth` (string, ISO date format)
-- `address` (string, max 255 chars)
+- `mobile` (string, valid mobile phone format)
+- `date_of_birth` (string, DD-MM-YYYY format)
+- `gender` (string, max 20 chars)
+- `marital_status` (string, max 20 chars)
+- `address` (string, max 500 chars)
 - `city` (string, max 100 chars)
-- `state` (string, max 50 chars)
+- `state` (string, max 100 chars)
 - `zip_code` (string, max 20 chars)
 - `country` (string, max 100 chars, default: "United States")
+- `emergency_contact_name` (string, max 200 chars)
+- `emergency_contact_phone` (string, valid phone format)
+- `notes` (string, max 2000 chars)
+- `tags` (array of strings) - Organizational tags for categorization
+- `status` (string, default: "active")
 
 #### Response
 

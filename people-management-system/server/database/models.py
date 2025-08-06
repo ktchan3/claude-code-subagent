@@ -13,7 +13,7 @@ from sqlalchemy import (
     Boolean, Column, DateTime, Date, ForeignKey, Integer, 
     String, Text, Numeric, Index, CheckConstraint, UniqueConstraint
 )
-from sqlalchemy.dialects.sqlite import UUID as SQLiteUUID
+from sqlalchemy.types import Uuid
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
@@ -41,14 +41,19 @@ class Person(Base, TimestampMixin):
     __tablename__ = "people"
     
     # Primary key
-    id = Column(SQLiteUUID(as_uuid=True), primary_key=True, default=uuid4)
+    id = Column(Uuid, primary_key=True, default=uuid4)
     
     # Personal information
     first_name = Column(String(100), nullable=False, index=True)
     last_name = Column(String(100), nullable=False, index=True)
+    title = Column(String(20), nullable=True)  # Mr., Ms., Dr., etc.
+    suffix = Column(String(20), nullable=True)  # Jr., Sr., III, etc.
     email = Column(String(254), nullable=False, unique=True, index=True)
     phone = Column(String(20), nullable=True)
+    mobile = Column(String(20), nullable=True)  # Mobile phone number
     date_of_birth = Column(Date, nullable=True)
+    gender = Column(String(50), nullable=True)
+    marital_status = Column(String(50), nullable=True)
     
     # Address information
     address = Column(String(255), nullable=True)
@@ -56,6 +61,15 @@ class Person(Base, TimestampMixin):
     state = Column(String(50), nullable=True)
     zip_code = Column(String(20), nullable=True)
     country = Column(String(100), nullable=True, default="United States")
+    
+    # Emergency contact
+    emergency_contact_name = Column(String(200), nullable=True)
+    emergency_contact_phone = Column(String(20), nullable=True)
+    
+    # Additional information
+    notes = Column(Text, nullable=True)
+    tags = Column(Text, nullable=True)  # JSON array stored as text
+    status = Column(String(20), nullable=True, default="Active")
     
     # Relationships
     employments = relationship(
@@ -70,7 +84,8 @@ class Person(Base, TimestampMixin):
         CheckConstraint("length(first_name) > 0", name="check_first_name_not_empty"),
         CheckConstraint("length(last_name) > 0", name="check_last_name_not_empty"),
         CheckConstraint("length(email) > 0", name="check_email_not_empty"),
-        CheckConstraint("date_of_birth IS NULL OR date_of_birth <= date('now')", name="check_birth_date_past"),
+        # Note: date_of_birth validation is done at application level, not database level
+        # SQLite doesn't allow date('now') in CHECK constraints (non-deterministic)
         Index("idx_person_name", "first_name", "last_name"),
         Index("idx_person_location", "city", "state", "country"),
     )
@@ -89,10 +104,58 @@ class Person(Base, TimestampMixin):
             raise ValueError(f"{key} cannot be empty")
         return name.strip()
     
+    @validates('title', 'suffix')
+    def validate_title_suffix(self, key, value):
+        """Validate title and suffix fields."""
+        if value:
+            return value.strip()
+        return value
+    
+    @validates('phone', 'mobile', 'emergency_contact_phone')
+    def validate_phone_numbers(self, key, phone):
+        """Validate phone number fields."""
+        if phone:
+            return phone.strip()
+        return phone
+    
+    @validates('tags')
+    def validate_tags(self, key, tags):
+        """Validate tags field."""
+        if tags:
+            return tags.strip()
+        return tags
+    
+    @validates('status')
+    def validate_status(self, key, status):
+        """Validate status field."""
+        if status:
+            valid_statuses = ["Active", "Inactive", "Pending", "Archived"]
+            if status not in valid_statuses:
+                raise ValueError(f"Status must be one of: {', '.join(valid_statuses)}")
+        return status
+    
+    @validates('date_of_birth')
+    def validate_date_of_birth(self, key, date_of_birth):
+        """Validate date of birth is not in the future."""
+        if date_of_birth and date_of_birth > date.today():
+            raise ValueError("Date of birth cannot be in the future")
+        return date_of_birth
+    
     @property
     def full_name(self) -> str:
         """Get the full name of the person."""
         return f"{self.first_name} {self.last_name}"
+    
+    @property
+    def tags_list(self) -> List[str]:
+        """Get tags as a list."""
+        if not self.tags:
+            return []
+        try:
+            import json
+            return json.loads(self.tags)
+        except (json.JSONDecodeError, TypeError):
+            return []
     
     @property
     def age(self) -> Optional[int]:
@@ -133,7 +196,7 @@ class Department(Base, TimestampMixin):
     __tablename__ = "departments"
     
     # Primary key
-    id = Column(SQLiteUUID(as_uuid=True), primary_key=True, default=uuid4)
+    id = Column(Uuid, primary_key=True, default=uuid4)
     
     # Department information
     name = Column(String(100), nullable=False, unique=True, index=True)
@@ -186,7 +249,7 @@ class Position(Base, TimestampMixin):
     __tablename__ = "positions"
     
     # Primary key
-    id = Column(SQLiteUUID(as_uuid=True), primary_key=True, default=uuid4)
+    id = Column(Uuid, primary_key=True, default=uuid4)
     
     # Position information
     title = Column(String(150), nullable=False, index=True)
@@ -194,7 +257,7 @@ class Position(Base, TimestampMixin):
     
     # Foreign keys
     department_id = Column(
-        SQLiteUUID(as_uuid=True), 
+        Uuid, 
         ForeignKey("departments.id", ondelete="CASCADE"), 
         nullable=False,
         index=True
@@ -248,17 +311,17 @@ class Employment(Base, TimestampMixin):
     __tablename__ = "employments"
     
     # Primary key
-    id = Column(SQLiteUUID(as_uuid=True), primary_key=True, default=uuid4)
+    id = Column(Uuid, primary_key=True, default=uuid4)
     
     # Foreign keys
     person_id = Column(
-        SQLiteUUID(as_uuid=True), 
+        Uuid, 
         ForeignKey("people.id", ondelete="CASCADE"), 
         nullable=False,
         index=True
     )
     position_id = Column(
-        SQLiteUUID(as_uuid=True), 
+        Uuid, 
         ForeignKey("positions.id", ondelete="CASCADE"), 
         nullable=False,
         index=True
@@ -276,7 +339,8 @@ class Employment(Base, TimestampMixin):
     
     # Constraints
     __table_args__ = (
-        CheckConstraint("start_date <= COALESCE(end_date, date('now'))", name="check_employment_dates"),
+        # Note: Date validation is done at application level, not database level
+        # SQLite doesn't allow date('now') in CHECK constraints (non-deterministic)
         CheckConstraint("salary IS NULL OR salary >= 0", name="check_salary_non_negative"),
         CheckConstraint(
             "(is_active = 1 AND end_date IS NULL) OR (is_active = 0 AND end_date IS NOT NULL)",

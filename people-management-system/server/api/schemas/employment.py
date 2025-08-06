@@ -8,7 +8,7 @@ operations including creation, updates, termination, and history tracking.
 from datetime import date, datetime
 from typing import List, Optional
 from uuid import UUID
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 from decimal import Decimal
 
 from .common import BaseSchema, TimestampSchema, get_uuid_field
@@ -27,14 +27,16 @@ class EmploymentBase(BaseSchema):
         example=85000.00
     )
     
-    @validator('start_date')
+    @field_validator('start_date')
+    @classmethod
     def validate_start_date(cls, v):
         """Validate start date is not in the future."""
         if v and v > date.today():
             raise ValueError('Start date cannot be in the future')
         return v
     
-    @validator('salary')
+    @field_validator('salary')
+    @classmethod
     def validate_salary(cls, v):
         """Validate salary amount."""
         if v is not None:
@@ -74,7 +76,8 @@ class EmploymentUpdate(BaseSchema):
     )
     position_id: Optional[UUID] = Field(None, description="New position ID (for promotions/transfers)")
     
-    @validator('salary')
+    @field_validator('salary')
+    @classmethod
     def validate_salary(cls, v):
         """Validate salary amount."""
         if v is not None:
@@ -104,7 +107,8 @@ class EmploymentTerminate(BaseSchema):
         example="Voluntary resignation"
     )
     
-    @validator('end_date')
+    @field_validator('end_date')
+    @classmethod
     def validate_end_date(cls, v):
         """Validate end date is not in the future."""
         if v and v > date.today():
@@ -304,35 +308,39 @@ class EmploymentSearch(BaseSchema):
     min_tenure_months: Optional[int] = Field(None, ge=0, description="Minimum tenure in months")
     max_tenure_months: Optional[int] = Field(None, ge=0, description="Maximum tenure in months")
     
-    @validator('start_date_to')
-    def validate_start_date_range(cls, v, values):
+    @field_validator('start_date_to')
+    @classmethod
+    def validate_start_date_range(cls, v, info):
         """Validate start date range."""
-        if v is not None and 'start_date_from' in values and values['start_date_from'] is not None:
-            if v < values['start_date_from']:
+        if v is not None and hasattr(info.data, 'start_date_from') and info.data.start_date_from is not None:
+            if v < info.data.start_date_from:
                 raise ValueError('start_date_to must be greater than or equal to start_date_from')
         return v
     
-    @validator('end_date_to')
-    def validate_end_date_range(cls, v, values):
+    @field_validator('end_date_to')
+    @classmethod
+    def validate_end_date_range(cls, v, info):
         """Validate end date range."""
-        if v is not None and 'end_date_from' in values and values['end_date_from'] is not None:
-            if v < values['end_date_from']:
+        if v is not None and hasattr(info.data, 'end_date_from') and info.data.end_date_from is not None:
+            if v < info.data.end_date_from:
                 raise ValueError('end_date_to must be greater than or equal to end_date_from')
         return v
     
-    @validator('max_salary')
-    def validate_salary_range(cls, v, values):
+    @field_validator('max_salary')
+    @classmethod
+    def validate_salary_range(cls, v, info):
         """Validate salary range."""
-        if v is not None and 'min_salary' in values and values['min_salary'] is not None:
-            if v < values['min_salary']:
+        if v is not None and hasattr(info.data, 'min_salary') and info.data.min_salary is not None:
+            if v < info.data.min_salary:
                 raise ValueError('max_salary must be greater than or equal to min_salary')
         return v
     
-    @validator('max_tenure_months')
-    def validate_tenure_range(cls, v, values):
+    @field_validator('max_tenure_months')
+    @classmethod
+    def validate_tenure_range(cls, v, info):
         """Validate tenure range."""
-        if v is not None and 'min_tenure_months' in values and values['min_tenure_months'] is not None:
-            if v < values['min_tenure_months']:
+        if v is not None and hasattr(info.data, 'min_tenure_months') and info.data.min_tenure_months is not None:
+            if v < info.data.min_tenure_months:
                 raise ValueError('max_tenure_months must be greater than or equal to min_tenure_months')
         return v
     
@@ -394,7 +402,8 @@ class EmploymentBulkTerminate(BaseSchema):
         description="Common reason for termination"
     )
     
-    @validator('end_date')
+    @field_validator('end_date')
+    @classmethod
     def validate_end_date(cls, v):
         """Validate end date is not in the future."""
         if v and v > date.today():
@@ -432,14 +441,16 @@ class EmploymentTransfer(BaseSchema):
         description="Transfer notes or reason"
     )
     
-    @validator('transfer_date')
+    @field_validator('transfer_date')
+    @classmethod
     def validate_transfer_date(cls, v):
         """Validate transfer date."""
         if v and v > date.today():
             raise ValueError('Transfer date cannot be in the future')
         return v
     
-    @validator('new_salary')
+    @field_validator('new_salary')
+    @classmethod
     def validate_salary(cls, v):
         """Validate salary amount."""
         if v is not None:

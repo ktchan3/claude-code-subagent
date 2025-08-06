@@ -29,6 +29,17 @@ dependencies = [
 Homepage = "https://github.com/yourusername/people-management-system"
 Repository = "https://github.com/yourusername/people-management-system"
 
+[dependency-groups]
+dev = [
+    "black>=25.1.0",
+    "mypy>=1.17.1",
+    "pre-commit>=4.2.0",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
+    "pytest-qt>=4.5.0",
+    "ruff>=0.12.7",
+]
+
 [tool.setuptools]
 packages = []  # Root project has no packages, only workspace members
 

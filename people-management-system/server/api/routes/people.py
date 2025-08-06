@@ -40,6 +40,42 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/people", tags=["people"])
 
 
+def format_person_response_data(person: Person) -> dict:
+    """
+    Convert a Person database object to properly formatted response data.
+    
+    This helper function ensures consistent response formatting across all endpoints
+    and handles the conversion of complex fields like dates and tags.
+    """
+    return {
+        "id": person.id,
+        "first_name": person.first_name,
+        "last_name": person.last_name,
+        "title": person.title,
+        "suffix": person.suffix,
+        "email": person.email,
+        "phone": person.phone,
+        "mobile": person.mobile,
+        "date_of_birth": person.date_of_birth.strftime('%d-%m-%Y') if person.date_of_birth else None,
+        "gender": person.gender,
+        "marital_status": person.marital_status,
+        "address": person.address,
+        "city": person.city,
+        "state": person.state,
+        "zip_code": person.zip_code,
+        "country": person.country,
+        "emergency_contact_name": person.emergency_contact_name,
+        "emergency_contact_phone": person.emergency_contact_phone,
+        "notes": person.notes,
+        "tags": person.tags_list,  # Use the property that converts JSON to list
+        "status": person.status,
+        "full_name": person.full_name,
+        "age": person.age,
+        "created_at": person.created_at,
+        "updated_at": person.updated_at
+    }
+
+
 @router.post(
     "/",
     response_model=PersonResponse,
@@ -53,19 +89,72 @@ async def create_person(
 ) -> PersonResponse:
     """Create a new person."""
     try:
+        logger.debug("=== SERVER CREATE PERSON ===")
+        logger.debug(f"Received person_data: {person_data}")
+        
         # Check if email already exists
         existing_person = db.query(Person).filter(Person.email == person_data.email).first()
         if existing_person:
             raise EmailAlreadyExistsError(person_data.email)
         
         # Create new person
-        db_person = Person(**person_data.dict())
+        person_dict = person_data.dict(exclude_unset=True, exclude_none=True)
+        
+        logger.debug(f"person_dict after processing: {person_dict}")
+        logger.debug(f"Title in dict: '{person_dict.get('title')}'")
+        logger.debug(f"Suffix in dict: '{person_dict.get('suffix')}'")
+        logger.debug(f"First name in dict: '{person_dict.get('first_name')}'")
+        logger.debug(f"Last name in dict: '{person_dict.get('last_name')}'")
+        logger.debug(f"Email in dict: '{person_dict.get('email')}'")
+        
+        # Handle tags field conversion (List[str] -> JSON string)
+        if 'tags' in person_dict and person_dict['tags'] is not None:
+            import json
+            person_dict['tags'] = json.dumps(person_dict['tags'])
+        
+        db_person = Person(**person_dict)
         db.add(db_person)
         db.commit()
         db.refresh(db_person)
         
+        logger.debug(f"Saved person to database:")
+        logger.debug(f"DB title: '{db_person.title}'")
+        logger.debug(f"DB suffix: '{db_person.suffix}'")
+        logger.debug(f"DB first_name: '{db_person.first_name}'")
+        logger.debug(f"DB last_name: '{db_person.last_name}'")
+        logger.debug("=== END SERVER CREATE PERSON ===")
+        
+        # Convert database object to response format
+        response_data = {
+            "id": db_person.id,
+            "first_name": db_person.first_name,
+            "last_name": db_person.last_name,
+            "title": db_person.title,
+            "suffix": db_person.suffix,
+            "email": db_person.email,
+            "phone": db_person.phone,
+            "mobile": db_person.mobile,
+            "date_of_birth": db_person.date_of_birth.strftime('%d-%m-%Y') if db_person.date_of_birth else None,
+            "gender": db_person.gender,
+            "marital_status": db_person.marital_status,
+            "address": db_person.address,
+            "city": db_person.city,
+            "state": db_person.state,
+            "zip_code": db_person.zip_code,
+            "country": db_person.country,
+            "emergency_contact_name": db_person.emergency_contact_name,
+            "emergency_contact_phone": db_person.emergency_contact_phone,
+            "notes": db_person.notes,
+            "tags": db_person.tags_list,  # Use the property that converts JSON to list
+            "status": db_person.status,
+            "full_name": db_person.full_name,
+            "age": db_person.age,
+            "created_at": db_person.created_at,
+            "updated_at": db_person.updated_at
+        }
+        
         logger.info(f"Created new person: {db_person.full_name} ({db_person.id})")
-        return PersonResponse.from_orm(db_person)
+        return PersonResponse(**response_data)
         
     except EmailAlreadyExistsError:
         raise
@@ -167,7 +256,36 @@ async def get_person(
         if not person:
             raise PersonNotFoundError(str(person_id))
         
-        return PersonResponse.from_orm(person)
+        # Convert database object to response format
+        response_data = {
+            "id": person.id,
+            "first_name": person.first_name,
+            "last_name": person.last_name,
+            "title": person.title,
+            "suffix": person.suffix,
+            "email": person.email,
+            "phone": person.phone,
+            "mobile": person.mobile,
+            "date_of_birth": person.date_of_birth.strftime('%d-%m-%Y') if person.date_of_birth else None,
+            "gender": person.gender,
+            "marital_status": person.marital_status,
+            "address": person.address,
+            "city": person.city,
+            "state": person.state,
+            "zip_code": person.zip_code,
+            "country": person.country,
+            "emergency_contact_name": person.emergency_contact_name,
+            "emergency_contact_phone": person.emergency_contact_phone,
+            "notes": person.notes,
+            "tags": person.tags_list,  # Use the property that converts JSON to list
+            "status": person.status,
+            "full_name": person.full_name,
+            "age": person.age,
+            "created_at": person.created_at,
+            "updated_at": person.updated_at
+        }
+        
+        return PersonResponse(**response_data)
         
     except PersonNotFoundError:
         raise
@@ -218,7 +336,33 @@ async def get_person_with_employment(
         ]
         
         # Create response data
-        person_data = PersonResponse.from_orm(person).dict()
+        person_data = {
+            "id": person.id,
+            "first_name": person.first_name,
+            "last_name": person.last_name,
+            "title": person.title,
+            "suffix": person.suffix,
+            "email": person.email,
+            "phone": person.phone,
+            "mobile": person.mobile,
+            "date_of_birth": person.date_of_birth.strftime('%d-%m-%Y') if person.date_of_birth else None,
+            "gender": person.gender,
+            "marital_status": person.marital_status,
+            "address": person.address,
+            "city": person.city,
+            "state": person.state,
+            "zip_code": person.zip_code,
+            "country": person.country,
+            "emergency_contact_name": person.emergency_contact_name,
+            "emergency_contact_phone": person.emergency_contact_phone,
+            "notes": person.notes,
+            "tags": person.tags_list,  # Use the property that converts JSON to list
+            "status": person.status,
+            "full_name": person.full_name,
+            "age": person.age,
+            "created_at": person.created_at,
+            "updated_at": person.updated_at
+        }
         person_data["current_employment"] = current_emp_data
         person_data["employment_history"] = past_employments
         
@@ -257,15 +401,50 @@ async def update_person(
                 raise EmailAlreadyExistsError(person_data.email)
         
         # Update person fields
-        update_data = person_data.dict(exclude_unset=True)
+        update_data = person_data.dict(exclude_unset=True, exclude_none=True)
+        
+        # Handle tags field conversion (List[str] -> JSON string) for updates
+        if 'tags' in update_data and update_data['tags'] is not None:
+            import json
+            update_data['tags'] = json.dumps(update_data['tags'])
+        
         for field, value in update_data.items():
             setattr(person, field, value)
         
         db.commit()
         db.refresh(person)
         
+        # Convert database object to response format (same as create endpoint)
+        response_data = {
+            "id": person.id,
+            "first_name": person.first_name,
+            "last_name": person.last_name,
+            "title": person.title,
+            "suffix": person.suffix,
+            "email": person.email,
+            "phone": person.phone,
+            "mobile": person.mobile,
+            "date_of_birth": person.date_of_birth.strftime('%d-%m-%Y') if person.date_of_birth else None,
+            "gender": person.gender,
+            "marital_status": person.marital_status,
+            "address": person.address,
+            "city": person.city,
+            "state": person.state,
+            "zip_code": person.zip_code,
+            "country": person.country,
+            "emergency_contact_name": person.emergency_contact_name,
+            "emergency_contact_phone": person.emergency_contact_phone,
+            "notes": person.notes,
+            "tags": person.tags_list,  # Use the property that converts JSON to list
+            "status": person.status,
+            "full_name": person.full_name,
+            "age": person.age,
+            "created_at": person.created_at,
+            "updated_at": person.updated_at
+        }
+        
         logger.info(f"Updated person: {person.full_name} ({person.id})")
-        return PersonResponse.from_orm(person)
+        return PersonResponse(**response_data)
         
     except (PersonNotFoundError, EmailAlreadyExistsError):
         raise
@@ -301,15 +480,44 @@ async def update_person_contact(
                 raise EmailAlreadyExistsError(contact_data.email)
         
         # Update contact fields
-        update_data = contact_data.dict(exclude_unset=True)
+        update_data = contact_data.dict(exclude_unset=True, exclude_none=True)
         for field, value in update_data.items():
             setattr(person, field, value)
         
         db.commit()
         db.refresh(person)
         
+        # Convert database object to response format
+        response_data = {
+            "id": person.id,
+            "first_name": person.first_name,
+            "last_name": person.last_name,
+            "title": person.title,
+            "suffix": person.suffix,
+            "email": person.email,
+            "phone": person.phone,
+            "mobile": person.mobile,
+            "date_of_birth": person.date_of_birth.strftime('%d-%m-%Y') if person.date_of_birth else None,
+            "gender": person.gender,
+            "marital_status": person.marital_status,
+            "address": person.address,
+            "city": person.city,
+            "state": person.state,
+            "zip_code": person.zip_code,
+            "country": person.country,
+            "emergency_contact_name": person.emergency_contact_name,
+            "emergency_contact_phone": person.emergency_contact_phone,
+            "notes": person.notes,
+            "tags": person.tags_list,  # Use the property that converts JSON to list
+            "status": person.status,
+            "full_name": person.full_name,
+            "age": person.age,
+            "created_at": person.created_at,
+            "updated_at": person.updated_at
+        }
+        
         logger.info(f"Updated contact info for person: {person.full_name} ({person.id})")
-        return PersonResponse.from_orm(person)
+        return PersonResponse(**response_data)
         
     except (PersonNotFoundError, EmailAlreadyExistsError):
         raise
@@ -337,15 +545,44 @@ async def update_person_address(
             raise PersonNotFoundError(str(person_id))
         
         # Update address fields
-        update_data = address_data.dict(exclude_unset=True)
+        update_data = address_data.dict(exclude_unset=True, exclude_none=True)
         for field, value in update_data.items():
             setattr(person, field, value)
         
         db.commit()
         db.refresh(person)
         
+        # Convert database object to response format
+        response_data = {
+            "id": person.id,
+            "first_name": person.first_name,
+            "last_name": person.last_name,
+            "title": person.title,
+            "suffix": person.suffix,
+            "email": person.email,
+            "phone": person.phone,
+            "mobile": person.mobile,
+            "date_of_birth": person.date_of_birth.strftime('%d-%m-%Y') if person.date_of_birth else None,
+            "gender": person.gender,
+            "marital_status": person.marital_status,
+            "address": person.address,
+            "city": person.city,
+            "state": person.state,
+            "zip_code": person.zip_code,
+            "country": person.country,
+            "emergency_contact_name": person.emergency_contact_name,
+            "emergency_contact_phone": person.emergency_contact_phone,
+            "notes": person.notes,
+            "tags": person.tags_list,  # Use the property that converts JSON to list
+            "status": person.status,
+            "full_name": person.full_name,
+            "age": person.age,
+            "created_at": person.created_at,
+            "updated_at": person.updated_at
+        }
+        
         logger.info(f"Updated address for person: {person.full_name} ({person.id})")
-        return PersonResponse.from_orm(person)
+        return PersonResponse(**response_data)
         
     except PersonNotFoundError:
         raise
@@ -486,7 +723,36 @@ async def get_person_by_email(
         if not person:
             raise HTTPBadRequestError(f"No person found with email: {email}")
         
-        return PersonResponse.from_orm(person)
+        # Convert database object to response format
+        response_data = {
+            "id": person.id,
+            "first_name": person.first_name,
+            "last_name": person.last_name,
+            "title": person.title,
+            "suffix": person.suffix,
+            "email": person.email,
+            "phone": person.phone,
+            "mobile": person.mobile,
+            "date_of_birth": person.date_of_birth.strftime('%d-%m-%Y') if person.date_of_birth else None,
+            "gender": person.gender,
+            "marital_status": person.marital_status,
+            "address": person.address,
+            "city": person.city,
+            "state": person.state,
+            "zip_code": person.zip_code,
+            "country": person.country,
+            "emergency_contact_name": person.emergency_contact_name,
+            "emergency_contact_phone": person.emergency_contact_phone,
+            "notes": person.notes,
+            "tags": person.tags_list,  # Use the property that converts JSON to list
+            "status": person.status,
+            "full_name": person.full_name,
+            "age": person.age,
+            "created_at": person.created_at,
+            "updated_at": person.updated_at
+        }
+        
+        return PersonResponse(**response_data)
         
     except HTTPBadRequestError:
         raise
@@ -524,7 +790,14 @@ async def bulk_create_people(
                     continue
                 
                 # Create person
-                db_person = Person(**person_data.dict())
+                person_dict = person_data.dict(exclude_unset=True, exclude_none=True)
+                
+                # Handle tags field conversion (List[str] -> JSON string)
+                if 'tags' in person_dict and person_dict['tags'] is not None:
+                    import json
+                    person_dict['tags'] = json.dumps(person_dict['tags'])
+                
+                db_person = Person(**person_dict)
                 db.add(db_person)
                 db.flush()  # Get ID without committing
                 

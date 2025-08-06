@@ -20,6 +20,7 @@ from client.services.config_service import ConfigService
 from client.services.api_service import APIService
 from client.ui.login_dialog import LoginDialog
 from client.ui.main_window import MainWindow
+from client.utils.async_utils import safe_sync_run, cleanup_global_runner
 
 
 # Configure logging
@@ -52,9 +53,7 @@ class PeopleManagementApp(QApplication):
         self.main_window: Optional[MainWindow] = None
         self.splash: Optional[QSplashScreen] = None
         
-        # Set up event loop for async operations
-        self.event_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.event_loop)
+        # Note: We'll use the async utilities to handle event loop management
         
         # Dark/Light theme handling
         self.setStyle("Fusion")
@@ -115,12 +114,12 @@ class PeopleManagementApp(QApplication):
             
             # Initialize configuration service
             self.config_service = ConfigService()
-            await self.config_service.initialize()
+            self.config_service.initialize()  # Now sync
             
             self.show_splash_message("Loading settings...")
             
             # Load saved configuration
-            config = await self.config_service.load_config()
+            config = self.config_service.load_config()  # Now sync
             
             if config and config.get('api_key') and config.get('base_url'):
                 self.show_splash_message("Connecting to API...")
@@ -131,12 +130,17 @@ class PeopleManagementApp(QApplication):
                     api_key=config['api_key']
                 )
                 
-                # Test connection
-                if await self.api_service.test_connection():
-                    logger.info("Successfully connected to API")
-                    return True
-                else:
-                    logger.warning("Failed to connect to API with saved credentials")
+                # Test connection (run in background to avoid blocking)
+                try:
+                    connection_ok = self.api_service.test_connection()
+                    if connection_ok:
+                        logger.info("Successfully connected to API")
+                        return True
+                    else:
+                        logger.warning("Failed to connect to API with saved credentials")
+                        self.api_service = None
+                except Exception as e:
+                    logger.warning(f"Connection test failed: {e}")
                     self.api_service = None
             
             return False
@@ -186,18 +190,21 @@ class PeopleManagementApp(QApplication):
         try:
             # Save configuration
             if self.config_service:
-                asyncio.run(self.config_service.save_config())
+                # save_config is now sync
+                try:
+                    self.config_service.save_config()
+                except Exception as save_error:
+                    logger.warning(f"Failed to save configuration: {save_error}")
             
             # Close API service
             if self.api_service:
-                asyncio.run(self.api_service.close())
+                self.api_service.close()
                 
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
         
-        # Close event loop
-        if self.event_loop and not self.event_loop.is_closed():
-            self.event_loop.close()
+        # Clean up async utilities
+        cleanup_global_runner()
         
         self.quit()
     
@@ -277,9 +284,10 @@ async def run_app():
 
 def main():
     """Main entry point for the application."""
-    # Set up Qt application attributes before creating QApplication
-    QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    # HiDPI support is automatic in Qt6/PySide6, no need to set attributes
+    # The following deprecated attributes are removed:
+    # - Qt.AA_EnableHighDpiScaling
+    # - Qt.AA_UseHighDpiPixmaps
     
     try:
         # Run the async application

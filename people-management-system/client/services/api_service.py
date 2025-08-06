@@ -5,7 +5,6 @@ Provides a Qt-friendly wrapper around the shared API client with signals,
 threading support, and caching for the GUI application.
 """
 
-import asyncio
 import logging
 from typing import Dict, Any, Optional, List, Callable
 from datetime import datetime, timedelta
@@ -33,42 +32,32 @@ from shared.api_client import (
 logger = logging.getLogger(__name__)
 
 
-class AsyncWorker(QThread):
-    """Worker thread for async API operations."""
+class SyncWorker(QThread):
+    """Worker thread for synchronous API operations."""
     
     # Signals
     finished = Signal(object)  # Result of the operation
     error = Signal(Exception)  # Error that occurred
     progress = Signal(str)  # Progress message
     
-    def __init__(self, coro_func, *args, **kwargs):
+    def __init__(self, sync_func, *args, **kwargs):
         super().__init__()
-        self.coro_func = coro_func
+        self.sync_func = sync_func
         self.args = args
         self.kwargs = kwargs
         self.result = None
         self.exception = None
     
     def run(self):
-        """Run the async operation in this thread."""
+        """Run the synchronous operation in this thread."""
         try:
-            # Create new event loop for this thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            # Run the coroutine
-            self.result = loop.run_until_complete(
-                self.coro_func(*self.args, **self.kwargs)
-            )
-            
+            # Run the synchronous function
+            self.result = self.sync_func(*self.args, **self.kwargs)
             self.finished.emit(self.result)
             
         except Exception as e:
             self.exception = e
             self.error.emit(e)
-            
-        finally:
-            loop.close()
 
 
 class CacheEntry:
@@ -128,7 +117,7 @@ class APIService(QObject):
         self.cache_ttl = 300  # 5 minutes default TTL
         
         # Active workers
-        self.active_workers: List[AsyncWorker] = []
+        self.active_workers: List[SyncWorker] = []
         
         # Auto-refresh timer
         self.refresh_timer = QTimer()
@@ -186,9 +175,9 @@ class APIService(QObject):
         ttl = ttl_seconds or self.cache_ttl
         self.cache[cache_key] = CacheEntry(data, ttl)
     
-    def _create_worker(self, coro_func: Callable, *args, **kwargs) -> AsyncWorker:
-        """Create and configure an async worker."""
-        worker = AsyncWorker(coro_func, *args, **kwargs)
+    def _create_worker(self, sync_func: Callable, *args, **kwargs) -> SyncWorker:
+        """Create and configure a sync worker."""
+        worker = SyncWorker(sync_func, *args, **kwargs)
         
         # Connect signals
         worker.finished.connect(self._on_worker_finished)
@@ -227,10 +216,10 @@ class APIService(QObject):
     
     # Connection management
     
-    async def test_connection(self) -> bool:
+    def test_connection(self) -> bool:
         """Test API connection."""
         try:
-            await self.client.health_check()
+            self.client.test_connection()
             self.is_connected = True
             self.last_connection_test = datetime.utcnow()
             self.connection_status_changed.emit(True)
@@ -248,7 +237,7 @@ class APIService(QObject):
         worker = self._create_worker(self.test_connection)
         worker.start()
     
-    async def close(self):
+    def close(self):
         """Close the API client."""
         # Stop auto-refresh
         self.refresh_timer.stop()
@@ -260,17 +249,37 @@ class APIService(QObject):
                 worker.wait(5000)  # Wait max 5 seconds
         
         # Close API client
-        await self.client.close()
+        self.client.close()
         
         self.is_connected = False
         self.connection_status_changed.emit(False)
     
     # People operations
     
-    async def create_person(self, person_data: Dict[str, Any]) -> Dict[str, Any]:
+    def create_person(self, person_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new person."""
+        logger.debug("=== API SERVICE CREATE PERSON ===")
+        logger.debug(f"Input data: {person_data}")
+        
+        # Log specific fields we're concerned about
+        logger.debug(f"Input title: '{person_data.get('title')}'")
+        logger.debug(f"Input suffix: '{person_data.get('suffix')}'")
+        logger.debug(f"Input first_name: '{person_data.get('first_name')}'")
+        logger.debug(f"Input last_name: '{person_data.get('last_name')}'")
+        
         person = PersonData(**person_data)
-        result = await self.client.create_person(person)
+        
+        # Log PersonData after conversion
+        person_dict = person.dict()
+        logger.debug(f"PersonData dict: {person_dict}")
+        logger.debug(f"PersonData title: '{person_dict.get('title')}'")
+        logger.debug(f"PersonData suffix: '{person_dict.get('suffix')}'")
+        
+        result = self.client.create_person(person)
+        
+        # Log result
+        logger.debug(f"API result: {result}")
+        logger.debug("=== END API SERVICE CREATE PERSON ===")
         
         # Invalidate people cache
         self._invalidate_cache('people_')
@@ -286,14 +295,14 @@ class APIService(QObject):
         )
         worker.start()
     
-    async def list_people(self, 
-                         page: int = 1, 
-                         page_size: int = 20,
-                         query: Optional[str] = None,
-                         sort_by: Optional[str] = None,
-                         sort_desc: bool = False,
-                         active_only: Optional[bool] = None,
-                         use_cache: bool = True) -> Dict[str, Any]:
+    def list_people(self, 
+                   page: int = 1, 
+                   page_size: int = 20,
+                   query: Optional[str] = None,
+                   sort_by: Optional[str] = None,
+                   sort_desc: bool = False,
+                   active_only: Optional[bool] = None,
+                   use_cache: bool = True) -> Dict[str, Any]:
         """List people with filtering and pagination."""
         
         cache_key = self._get_cache_key(
@@ -316,7 +325,7 @@ class APIService(QObject):
         pagination = PaginationParams(page=page, size=page_size)
         search = SearchParams(query=query, sort_by=sort_by, sort_desc=sort_desc)
         
-        result = await self.client.list_people(
+        result = self.client.list_people(
             pagination=pagination,
             search=search,
             active_only=active_only
@@ -336,7 +345,7 @@ class APIService(QObject):
         )
         worker.start()
     
-    async def get_person(self, person_id: str, use_cache: bool = True) -> Dict[str, Any]:
+    def get_person(self, person_id: str, use_cache: bool = True) -> Dict[str, Any]:
         """Get person by ID."""
         cache_key = f"person_{person_id}"
         
@@ -345,7 +354,7 @@ class APIService(QObject):
             if cached_data:
                 return cached_data
         
-        result = await self.client.get_person(person_id)
+        result = self.client.get_person(person_id)
         self._set_cached_data(cache_key, result)
         
         return result
@@ -359,9 +368,9 @@ class APIService(QObject):
         )
         worker.start()
     
-    async def update_person(self, person_id: str, person_data: Dict[str, Any]) -> Dict[str, Any]:
+    def update_person(self, person_id: str, person_data: Dict[str, Any]) -> Dict[str, Any]:
         """Update person."""
-        result = await self.client.update_person(person_id, person_data)
+        result = self.client.update_person(person_id, person_data)
         
         # Invalidate cache
         self._invalidate_cache('people_')
@@ -378,9 +387,9 @@ class APIService(QObject):
         )
         worker.start()
     
-    async def delete_person(self, person_id: str) -> Dict[str, Any]:
+    def delete_person(self, person_id: str) -> Dict[str, Any]:
         """Delete person."""
-        result = await self.client.delete_person(person_id)
+        result = self.client.delete_person(person_id)
         
         # Invalidate cache
         self._invalidate_cache('people_')
@@ -399,7 +408,7 @@ class APIService(QObject):
     
     # Department operations
     
-    async def list_departments(self, page: int = 1, page_size: int = 20, use_cache: bool = True) -> Dict[str, Any]:
+    def list_departments(self, page: int = 1, page_size: int = 20, use_cache: bool = True) -> Dict[str, Any]:
         """List departments."""
         cache_key = self._get_cache_key('departments_list', page=page, page_size=page_size)
         
@@ -409,7 +418,7 @@ class APIService(QObject):
                 return cached_data
         
         pagination = PaginationParams(page=page, size=page_size)
-        result = await self.client.list_departments(pagination=pagination)
+        result = self.client.list_departments(pagination=pagination)
         
         self._set_cached_data(cache_key, result)
         return result
@@ -423,10 +432,10 @@ class APIService(QObject):
         )
         worker.start()
     
-    async def create_department(self, department_data: Dict[str, Any]) -> Dict[str, Any]:
+    def create_department(self, department_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create department."""
         department = DepartmentData(**department_data)
-        result = await self.client.create_department(department)
+        result = self.client.create_department(department)
         
         self._invalidate_cache('departments_')
         return result
@@ -442,11 +451,11 @@ class APIService(QObject):
     
     # Position operations
     
-    async def list_positions(self, 
-                           page: int = 1, 
-                           page_size: int = 20,
-                           department_id: Optional[str] = None,
-                           use_cache: bool = True) -> Dict[str, Any]:
+    def list_positions(self, 
+                      page: int = 1, 
+                      page_size: int = 20,
+                      department_id: Optional[str] = None,
+                      use_cache: bool = True) -> Dict[str, Any]:
         """List positions."""
         cache_key = self._get_cache_key(
             'positions_list',
@@ -461,7 +470,7 @@ class APIService(QObject):
                 return cached_data
         
         pagination = PaginationParams(page=page, size=page_size)
-        result = await self.client.list_positions(
+        result = self.client.list_positions(
             pagination=pagination,
             department_id=department_id
         )
@@ -480,13 +489,13 @@ class APIService(QObject):
     
     # Employment operations
     
-    async def list_employment(self,
-                            page: int = 1,
-                            page_size: int = 20,
-                            person_id: Optional[str] = None,
-                            position_id: Optional[str] = None,
-                            active_only: Optional[bool] = None,
-                            use_cache: bool = True) -> Dict[str, Any]:
+    def list_employment(self,
+                       page: int = 1,
+                       page_size: int = 20,
+                       person_id: Optional[str] = None,
+                       position_id: Optional[str] = None,
+                       active_only: Optional[bool] = None,
+                       use_cache: bool = True) -> Dict[str, Any]:
         """List employment records."""
         cache_key = self._get_cache_key(
             'employment_list',
@@ -503,7 +512,7 @@ class APIService(QObject):
                 return cached_data
         
         pagination = PaginationParams(page=page, size=page_size)
-        result = await self.client.list_employment(
+        result = self.client.list_employment(
             pagination=pagination,
             person_id=person_id,
             position_id=position_id,
@@ -524,7 +533,7 @@ class APIService(QObject):
     
     # Statistics operations
     
-    async def get_statistics(self, use_cache: bool = True) -> Dict[str, Any]:
+    def get_statistics(self, use_cache: bool = True) -> Dict[str, Any]:
         """Get system statistics."""
         cache_key = "statistics"
         
@@ -533,10 +542,25 @@ class APIService(QObject):
             if cached_data:
                 return cached_data
         
-        result = await self.client.get_statistics()
-        self._set_cached_data(cache_key, result, ttl_seconds=60)  # Cache for 1 minute
-        
-        return result
+        try:
+            result = self.client.get_statistics()
+            self._set_cached_data(cache_key, result, ttl_seconds=60)  # Cache for 1 minute
+            return result
+        except NotFoundError:
+            # Statistics endpoint not available, return empty stats
+            logger.warning("Statistics endpoint not found, returning empty statistics")
+            empty_stats = {
+                'total_people': 0,
+                'active_employees': 0,
+                'total_departments': 0,
+                'total_positions': 0,
+                'average_salary': None,
+                'employment_statistics': {}
+            }
+            return empty_stats
+        except Exception as e:
+            logger.error(f"Failed to get statistics: {e}")
+            raise
     
     def get_statistics_async(self):
         """Get statistics asynchronously."""

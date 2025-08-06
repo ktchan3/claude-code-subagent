@@ -7,8 +7,10 @@ parameters, connection pooling, and environment-specific configurations.
 
 import os
 from pathlib import Path
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings
+from pydantic import Field, ConfigDict
 from typing import Optional
+from sqlalchemy.pool import StaticPool
 
 
 class DatabaseSettings(BaseSettings):
@@ -85,10 +87,11 @@ class DatabaseSettings(BaseSettings):
         description="Path to test SQLite database file"
     )
     
-    class Config:
-        env_file = ".env"
-        env_prefix = "DB_"
-        case_sensitive = False
+    model_config = ConfigDict(
+        env_file=".env",
+        env_prefix="DB_",
+        case_sensitive=False
+    )
 
 
 def get_database_settings() -> DatabaseSettings:
@@ -151,11 +154,17 @@ def get_engine_kwargs(testing: bool = False) -> dict:
     
     # For SQLite, we use StaticPool for connection pooling
     # to ensure proper handling of the single-file database
-    engine_kwargs.update({
-        "poolclass": "StaticPool",
-        "pool_timeout": settings.pool_timeout,
-        "pool_recycle": settings.pool_recycle,
-    })
+    # Note: SQLite doesn't support all pool parameters
+    if 'sqlite' in get_database_url(testing).lower():
+        engine_kwargs.update({
+            "poolclass": StaticPool,
+        })
+    else:
+        # For other databases, include pool parameters
+        engine_kwargs.update({
+            "pool_timeout": settings.pool_timeout,
+            "pool_recycle": settings.pool_recycle,
+        })
     
     if testing:
         # For testing, use in-memory database or separate test file

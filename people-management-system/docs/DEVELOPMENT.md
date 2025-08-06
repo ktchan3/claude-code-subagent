@@ -676,7 +676,7 @@ Create Date: 2024-01-01 12:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.sqlite import UUID
+from sqlalchemy.types import Uuid
 
 # revision identifiers
 revision = '001_add_user_table'
@@ -689,7 +689,7 @@ def upgrade() -> None:
     """Add user table."""
     op.create_table(
         'users',
-        sa.Column('id', UUID(as_uuid=True), primary_key=True),
+        sa.Column('id', Uuid, primary_key=True),
         sa.Column('username', sa.String(50), nullable=False, unique=True),
         sa.Column('email', sa.String(254), nullable=False, unique=True),
         sa.Column('hashed_password', sa.String(255), nullable=False),
@@ -860,6 +860,83 @@ Before submitting a PR, ensure:
 - [ ] Security implications reviewed
 
 ## Common Issues and Solutions
+
+### Critical Bug Fixes and Lessons Learned
+
+#### Person Field Saving Bug (RESOLVED)
+
+**Issue**: Person form fields (First Name, Last Name, Title, Suffix) were not being properly saved to the database. The fields would appear empty or None in the database even when provided by the user.
+
+**Root Cause**: The server API was using `person_data.dict()` without exclusion parameters, causing Pydantic to include all Optional fields as None values, overwriting actual user input.
+
+**Original problematic code:**
+```python
+# BAD: This includes all fields, even unset optional ones as None
+person_dict = person_data.dict()
+db_person = Person(**person_dict)
+```
+
+**Fixed code:**
+```python
+# GOOD: This excludes unset and None fields
+person_dict = person_data.dict(exclude_unset=True, exclude_none=True)
+db_person = Person(**person_dict)
+```
+
+**Solution Details**:
+1. **Updated API Route Handler**: Modified `/server/api/routes/people.py` to use `exclude_unset=True, exclude_none=True` parameters
+2. **Enhanced Debugging**: Added comprehensive logging to track data flow from client to database
+3. **Applied Consistently**: Same fix applied to both create and update operations
+
+**Key Learning**: When working with Pydantic models in API routes, always use `exclude_unset=True` and `exclude_none=True` to prevent overwriting existing data with None values.
+
+**Best Practices for Pydantic Model Handling**:
+
+1. **For Create Operations**:
+```python
+# Always exclude unset fields to prevent None overrides
+create_data = pydantic_model.dict(exclude_unset=True, exclude_none=True)
+db_object = DatabaseModel(**create_data)
+```
+
+2. **For Update Operations**:
+```python
+# Only update fields that were actually provided
+update_data = pydantic_model.dict(exclude_unset=True, exclude_none=True)
+for field, value in update_data.items():
+    setattr(db_object, field, value)
+```
+
+3. **For Response Models**:
+```python
+# Explicitly map all fields to ensure consistency
+response_data = {
+    "id": db_object.id,
+    "name": db_object.name,
+    "optional_field": db_object.optional_field,  # Will be None if not set
+    # ... other fields
+}
+```
+
+**Prevention Measures**:
+- Always test optional fields explicitly in your test cases
+- Add debug logging for critical data operations
+- Use database inspection tools to verify actual stored values
+- Review Pydantic serialization behavior for new models
+
+#### Schema Validation Enhancement
+
+Along with the field saving fix, we enhanced schema validation:
+
+```python
+# Added comprehensive field validation
+class PersonCreate(BaseModel):
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    title: Optional[str] = Field(None, max_length=50)
+    suffix: Optional[str] = Field(None, max_length=20)
+    # ... other fields
+```
 
 ### Development Environment Issues
 

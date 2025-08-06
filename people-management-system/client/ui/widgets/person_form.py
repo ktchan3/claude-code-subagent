@@ -26,20 +26,39 @@ logger = logging.getLogger(__name__)
 
 
 class EmailValidator(QValidator):
-    """Email address validator."""
+    """Email address validator that allows smooth typing of all valid email characters."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.email_regex = QRegularExpression(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+        # Complete email regex for final validation - allows single char TLD for testing
+        self.email_regex = QRegularExpression(r'^[a-zA-Z0-9.!#$%&\'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{1,}$')
+        
+        # Character set for valid email characters (permissive during typing)
+        self.valid_chars_regex = QRegularExpression(r'^[a-zA-Z0-9.!#$%&\'*+/=?^_`{|}~@-]*$')
     
     def validate(self, input_text: str, pos: int):
+        """
+        Validate email input with permissive typing approach.
+        
+        Returns:
+        - Acceptable: Complete valid email address
+        - Intermediate: Partial input or valid characters being typed
+        - Invalid: Only for truly invalid characters (should rarely happen)
+        """
         if not input_text:
             return QValidator.Intermediate, input_text, pos
         
+        # First check if input contains only valid email characters
+        if not self.valid_chars_regex.match(input_text).hasMatch():
+            return QValidator.Invalid, input_text, pos
+        
+        # Check if it's a complete, valid email
         if self.email_regex.match(input_text).hasMatch():
             return QValidator.Acceptable, input_text, pos
-        else:
-            return QValidator.Intermediate, input_text, pos
+        
+        # For partial input, be permissive to allow smooth typing
+        # Allow any partial input with valid characters
+        return QValidator.Intermediate, input_text, pos
 
 
 class PhoneValidator(QValidator):
@@ -126,7 +145,7 @@ class PersonForm(QWidget):
         layout.addWidget(scroll_area)
         
         # Action buttons
-        self.create_action_buttons(layout)
+        self.action_buttons_widget = self.create_action_buttons(layout)
         
         # Status bar
         self.create_status_bar(layout)
@@ -228,6 +247,8 @@ class PersonForm(QWidget):
         self.dob_edit.setDate(QDate.currentDate().addYears(-25))
         self.dob_edit.setCalendarPopup(True)
         self.dob_edit.setMaximumDate(QDate.currentDate())
+        # Set display format to dd-mm-yyyy
+        self.dob_edit.setDisplayFormat("dd-MM-yyyy")
         personal_layout.addRow("Date of Birth:", self.dob_edit)
         
         # Age (auto-calculated)
@@ -297,7 +318,9 @@ class PersonForm(QWidget):
     
     def create_action_buttons(self, layout: QVBoxLayout):
         """Create action buttons."""
-        button_layout = QHBoxLayout()
+        # Create a widget to hold the buttons so we can show/hide it
+        button_widget = QWidget()
+        button_layout = QHBoxLayout(button_widget)
         
         # Auto-save indicator
         self.auto_save_label = QLabel("")
@@ -323,7 +346,8 @@ class PersonForm(QWidget):
         self.save_btn.clicked.connect(self.save_person)
         button_layout.addWidget(self.save_btn)
         
-        layout.addLayout(button_layout)
+        layout.addWidget(button_widget)
+        return button_widget
     
     def create_status_bar(self, layout: QVBoxLayout):
         """Create status bar with validation messages."""
@@ -535,7 +559,7 @@ class PersonForm(QWidget):
             'state': self.state_edit.text().strip() or None,
             'zip_code': self.zip_edit.text().strip() or None,
             'country': self.country_combo.currentText().strip() or None,
-            'date_of_birth': self.dob_edit.date().toPython().isoformat() if self.dob_edit.date().isValid() else None,
+            'date_of_birth': self.dob_edit.date().toPython().strftime('%d-%m-%Y') if self.dob_edit.date().isValid() else None,
             'gender': self.gender_combo.currentText().strip() or None,
             'marital_status': self.marital_status_combo.currentText().strip() or None,
             'emergency_contact_name': self.emergency_name_edit.text().strip() or None,
@@ -546,6 +570,19 @@ class PersonForm(QWidget):
             'title': self.title_combo.currentText().strip() or None,
             'suffix': self.suffix_edit.text().strip() or None
         }
+        
+        # Include ID if editing existing record
+        if self.person_data and self.person_data.get('id'):
+            data['id'] = self.person_data['id']
+        
+        # Debug logging
+        logger.info('=== FORM DATA BEING SENT ===')
+        logger.info(f'First Name: {data.get("first_name")}')
+        logger.info(f'Last Name: {data.get("last_name")}')
+        logger.info(f'Title: {data.get("title")}')
+        logger.info(f'Suffix: {data.get("suffix")}')
+        logger.info(f'Email: {data.get("email")}')
+        logger.info('==========================')
         
         return data
     
@@ -577,10 +614,16 @@ class PersonForm(QWidget):
             # Personal info
             if data.get('date_of_birth'):
                 try:
-                    birth_date = datetime.fromisoformat(data['date_of_birth']).date()
+                    # Try to parse as dd-mm-yyyy format first
+                    birth_date = datetime.strptime(data['date_of_birth'], '%d-%m-%Y').date()
                     self.dob_edit.setDate(QDate(birth_date))
                 except (ValueError, TypeError):
-                    pass
+                    try:
+                        # Fall back to ISO format for backward compatibility
+                        birth_date = datetime.fromisoformat(data['date_of_birth']).date()
+                        self.dob_edit.setDate(QDate(birth_date))
+                    except (ValueError, TypeError):
+                        pass
             
             self.gender_combo.setCurrentText(data.get('gender', ''))
             self.marital_status_combo.setCurrentText(data.get('marital_status', ''))
@@ -628,7 +671,13 @@ class PersonForm(QWidget):
         self.is_editing = False
         
         # Clear all input fields
-        for widget in self.findChildren((QLineEdit, QTextEdit, QComboBox)):
+        # findChildren doesn't accept tuple of types in PySide6, so we need to call separately
+        widgets = []
+        widgets.extend(self.findChildren(QLineEdit))
+        widgets.extend(self.findChildren(QTextEdit))  
+        widgets.extend(self.findChildren(QComboBox))
+        
+        for widget in widgets:
             if isinstance(widget, (QLineEdit, QTextEdit)):
                 widget.clear()
             elif isinstance(widget, QComboBox):
@@ -659,14 +708,26 @@ class PersonForm(QWidget):
     
     def save_person(self):
         """Save person data."""
+        logger.debug("Save person requested")
+        
         if self.validate_form():
             data = self.get_form_data()
+            logger.debug(f"Form is valid, saving person data: {data.get('first_name')} {data.get('last_name')}")
             
             # Add ID if editing
             if self.is_editing and self.person_data:
                 data['id'] = self.person_data.get('id')
+                logger.debug(f"Editing existing person with ID: {data['id']}")
+            else:
+                logger.debug("Creating new person")
             
             self.save_requested.emit(data)
+            logger.debug("save_requested signal emitted")
+        else:
+            logger.debug(f"Form validation failed with errors: {self.validation_errors}")
+            # Show validation errors if not already shown
+            if self.validation_errors:
+                self.show_validation_errors()
     
     def set_auto_save_enabled(self, enabled: bool):
         """Enable/disable auto-save functionality."""
@@ -674,6 +735,11 @@ class PersonForm(QWidget):
         if not enabled:
             self.auto_save_timer.stop()
             self.auto_save_label.setText("")
+    
+    def set_action_buttons_visible(self, visible: bool):
+        """Show/hide the action buttons (Save, Cancel, Reset)."""
+        if hasattr(self, 'action_buttons_widget'):
+            self.action_buttons_widget.setVisible(visible)
     
     def get_validation_errors(self) -> Dict[str, str]:
         """Get current validation errors."""

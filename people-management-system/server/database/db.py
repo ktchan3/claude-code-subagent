@@ -35,7 +35,8 @@ def configure_sqlite_pragmas(dbapi_connection, connection_record):
     This function is called for each new SQLite connection to set important
     database configuration options.
     """
-    with dbapi_connection.cursor() as cursor:
+    cursor = dbapi_connection.cursor()
+    try:
         # Enable foreign key constraints (disabled by default in SQLite)
         cursor.execute("PRAGMA foreign_keys=ON")
         
@@ -53,6 +54,8 @@ def configure_sqlite_pragmas(dbapi_connection, connection_record):
         
         # Enable query planner optimizations
         cursor.execute("PRAGMA optimize")
+    finally:
+        cursor.close()
 
 
 def create_database_engine(database_url: str = None, testing: bool = False) -> Engine:
@@ -403,17 +406,22 @@ def health_check() -> dict:
                 
                 # Test write capability (rollback to avoid side effects)
                 try:
+                    # Use a unique email to avoid conflicts with actual data
+                    import uuid
+                    test_email = f"health_check_{uuid.uuid4().hex[:8]}@test.local"
+                    
                     person = Person(
-                        first_name="Test",
-                        last_name="User",
-                        email="test@example.com"
+                        first_name="HealthCheck",
+                        last_name="Test",
+                        email=test_email
                     )
                     session.add(person)
                     session.flush()  # Test constraints without committing
                     session.rollback()  # Rollback the test record
                     health_status["can_write"] = True
                 except Exception as e:
-                    health_status["errors"].append(f"Write test failed: {e}")
+                    session.rollback()  # Ensure rollback on error
+                    health_status["errors"].append(f"Write test failed: {str(e)}")
     
     except Exception as e:
         health_status["errors"].append(f"Health check failed: {e}")

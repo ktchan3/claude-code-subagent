@@ -17,8 +17,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QFont, QPixmap, QPalette, QIcon
 
-from client.services.config_service import ConfigService, ConnectionConfig, RecentConnection
+from client.services.config_service import ConfigService, ConnectionConfig, RecentConnection, validate_api_key, sanitize_api_key, APIKeyValidationError
 from client.services.api_service import APIService
+from client.utils.async_utils import QtSyncHelper
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ class LoginDialog(QDialog):
         self.config_service = config_service
         self.connection_config: Optional[Dict[str, Any]] = None
         self.test_worker: Optional[ConnectionTestWorker] = None
+        self.async_helper = QtSyncHelper(self)
         
         self.setWindowTitle("People Management System - Login")
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
@@ -167,6 +169,19 @@ class LoginDialog(QDialog):
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setPlaceholderText("Enter your API key")
         self.api_key_edit.setEchoMode(QLineEdit.Password)
+        
+        # Ensure single-line input only - reject newlines and other control chars
+        def filter_api_key_input(text):
+            # Remove newlines, carriage returns, and other control characters
+            filtered = ''.join(char for char in text if ord(char) >= 32 and char not in '\n\r\t')
+            if filtered != text:
+                # If we filtered something, update the field with the clean text
+                self.api_key_edit.setText(filtered)
+            return filtered
+        
+        # Connect text change signal to filter input
+        self.api_key_edit.textChanged.connect(filter_api_key_input)
+        
         form_layout.addRow("API Key:", self.api_key_edit)
         
         # Show API key checkbox
@@ -316,9 +331,26 @@ class LoginDialog(QDialog):
         url = self.url_edit.text().strip()
         api_key = self.api_key_edit.text().strip()
         
-        valid = bool(url and api_key)
-        self.connect_btn.setEnabled(valid)
-        self.test_btn.setEnabled(valid)
+        # Basic validation: both fields must have content
+        basic_valid = bool(url and api_key)
+        
+        # API key format validation
+        api_key_valid = validate_api_key(api_key) if api_key else False
+        
+        # Update status based on validation
+        if basic_valid and not api_key_valid:
+            self.status_label.setText("⚠ API key format appears invalid")
+            self.status_label.setStyleSheet("color: orange; font-style: italic;")
+        elif basic_valid and api_key_valid:
+            self.status_label.setText("")
+            self.status_label.setStyleSheet("color: gray; font-style: italic;")
+        else:
+            self.status_label.setText("")
+            self.status_label.setStyleSheet("color: gray; font-style: italic;")
+        
+        # Enable buttons if basic validation passes (allow connection attempt even with format warnings)
+        self.connect_btn.setEnabled(basic_valid)
+        self.test_btn.setEnabled(basic_valid)
     
     def load_saved_connections(self):
         """Load saved connections from config service."""
@@ -371,19 +403,22 @@ class LoginDialog(QDialog):
             
             # Try to get API key from keyring
             if self.config_service:
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    api_key = loop.run_until_complete(
-                        self.config_service.get_api_key(current_data.base_url)
-                    )
-                    loop.close()
-                    
+                def on_success(api_key):
                     if api_key:
                         self.api_key_edit.setText(api_key)
-                        
-                except Exception as e:
-                    logger.error(f"Error loading API key: {e}")
+                
+                def on_error(error):
+                    logger.error(f"Error loading API key: {error}")
+                
+                # Create a lambda that calls the method properly
+                def get_api_key():
+                    return self.config_service.get_api_key(current_data.base_url)
+                
+                self.async_helper.call_sync(
+                    get_api_key,
+                    success_callback=on_success,
+                    error_callback=on_error
+                )
             
             # Switch to quick connect tab
             self.tab_widget.setCurrentIndex(0)
@@ -399,19 +434,24 @@ class LoginDialog(QDialog):
         )
         
         if reply == QMessageBox.Yes and self.config_service:
-            try:
-                self.config_service._recent_connections.clear()
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self.config_service.save_recent_connections())
-                loop.close()
-                
+            def on_success(result):
                 # Reload the combo box
                 self.load_saved_connections()
-                
-            except Exception as e:
-                logger.error(f"Error clearing recent connections: {e}")
-                QMessageBox.warning(self, "Error", f"Failed to clear recent connections: {e}")
+            
+            def on_error(error):
+                logger.error(f"Error clearing recent connections: {error}")
+                QMessageBox.warning(self, "Error", f"Failed to clear recent connections: {error}")
+            
+            self.config_service._recent_connections.clear()
+            
+            def save_connections():
+                return self.config_service.save_recent_connections()
+            
+            self.async_helper.call_sync(
+                save_connections,
+                success_callback=on_success,
+                error_callback=on_error
+            )
     
     def test_connection(self):
         """Test the API connection."""
@@ -421,6 +461,24 @@ class LoginDialog(QDialog):
         if not url or not api_key:
             self.status_label.setText("Please enter both server URL and API key")
             return
+        
+        # Validate API key before testing
+        if not validate_api_key(api_key):
+            self.status_label.setText("⚠ API key format is invalid - connection may fail")
+            self.status_label.setStyleSheet("color: orange; font-weight: bold;")
+            
+            # Still allow the test to proceed (they might have a valid key that doesn't match our format)
+            reply = QMessageBox.question(
+                self,
+                "API Key Format Warning",
+                "The API key format appears invalid. This may cause the connection test to fail.\n\n"
+                "Do you want to proceed with the connection test anyway?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
         
         # Disable UI during test
         self.set_ui_enabled(False)
@@ -460,6 +518,44 @@ class LoginDialog(QDialog):
             QMessageBox.warning(self, "Invalid Input", "Please enter both server URL and API key")
             return
         
+        # Validate and sanitize API key
+        try:
+            if not validate_api_key(api_key):
+                # Try to sanitize the API key
+                try:
+                    sanitized_key = sanitize_api_key(api_key)
+                    reply = QMessageBox.question(
+                        self,
+                        "API Key Format Issue",
+                        f"The API key contains invalid characters that were automatically removed. "
+                        f"Do you want to proceed with the cleaned API key?\n\n"
+                        f"Original length: {len(api_key)} characters\n"
+                        f"Cleaned length: {len(sanitized_key)} characters",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    
+                    if reply == QMessageBox.Yes:
+                        api_key = sanitized_key
+                        # Update the UI field with the sanitized key
+                        self.api_key_edit.setText(api_key)
+                    else:
+                        return
+                        
+                except APIKeyValidationError as e:
+                    QMessageBox.critical(
+                        self,
+                        "Invalid API Key",
+                        f"The API key format is invalid and cannot be corrected:\n\n{str(e)}\n\n"
+                        f"Please enter a valid API key containing only alphanumeric characters, "
+                        f"hyphens, underscores, and dots."
+                    )
+                    return
+                    
+        except Exception as e:
+            QMessageBox.critical(self, "API Key Validation Error", f"Error validating API key: {str(e)}")
+            return
+        
         # Create connection config
         timeout = float(self.timeout_edit.text() or "30")
         verify_ssl = self.verify_ssl_cb.isChecked()
@@ -473,17 +569,28 @@ class LoginDialog(QDialog):
         
         # Save connection if requested
         if self.remember_cb.isChecked() and self.config_service:
-            try:
-                connection_config = ConnectionConfig(**self.connection_config)
-                
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self.config_service.update_connection_config(connection_config))
-                loop.run_until_complete(self.config_service.add_recent_connection("Server", url, True))
-                loop.close()
-                
-            except Exception as e:
-                logger.error(f"Error saving connection config: {e}")
+            def on_error(error):
+                logger.error(f"Error saving connection config: {error}")
+            
+            connection_config = ConnectionConfig(**self.connection_config)
+            
+            # Save connection config asynchronously
+            def update_config():
+                return self.config_service.update_connection_config(connection_config)
+            
+            self.async_helper.call_sync(
+                update_config,
+                error_callback=on_error
+            )
+            
+            # Save recent connection asynchronously
+            def add_recent():
+                return self.config_service.add_recent_connection("Server", url, True)
+            
+            self.async_helper.call_sync(
+                add_recent,
+                error_callback=on_error
+            )
         
         # Accept the dialog
         self.accept()
@@ -534,5 +641,9 @@ API keys are stored securely in your system's credential store.</p>
         if self.test_worker and self.test_worker.isRunning():
             self.test_worker.quit()
             self.test_worker.wait(3000)
+        
+        # Clean up async helper
+        if self.async_helper:
+            self.async_helper.cleanup()
         
         event.accept()

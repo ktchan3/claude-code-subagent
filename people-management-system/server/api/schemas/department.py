@@ -7,7 +7,7 @@ operations including CRUD and relationships with positions.
 
 from typing import List, Optional
 from uuid import UUID
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 
 from .common import BaseSchema, TimestampSchema, get_uuid_field, get_name_field, get_optional_text_field
 
@@ -25,7 +25,8 @@ class DepartmentBase(BaseSchema):
 class DepartmentCreate(DepartmentBase):
     """Schema for creating a new department."""
     
-    @validator('name')
+    @field_validator('name')
+    @classmethod
     def validate_name(cls, v):
         """Validate department name."""
         if v:
@@ -56,7 +57,8 @@ class DepartmentUpdate(BaseSchema):
         description="Department description"
     )
     
-    @validator('name')
+    @field_validator('name')
+    @classmethod
     def validate_name(cls, v):
         """Validate department name."""
         if v:
@@ -224,11 +226,12 @@ class DepartmentSearch(BaseSchema):
     min_employees: Optional[int] = Field(None, ge=0, description="Minimum number of active employees")
     max_employees: Optional[int] = Field(None, ge=0, description="Maximum number of active employees")
     
-    @validator('max_employees')
-    def validate_employee_range(cls, v, values):
+    @field_validator('max_employees')
+    @classmethod
+    def validate_employee_range(cls, v, info):
         """Validate that max_employees is greater than min_employees."""
-        if v is not None and 'min_employees' in values and values['min_employees'] is not None:
-            if v < values['min_employees']:
+        if v is not None and hasattr(info.data, 'min_employees') and info.data.min_employees is not None:
+            if v < info.data.min_employees:
                 raise ValueError('max_employees must be greater than or equal to min_employees')
         return v
     
@@ -309,10 +312,11 @@ class DepartmentMerge(BaseSchema):
     transfer_positions: bool = Field(True, description="Whether to transfer positions to target department")
     delete_source: bool = Field(True, description="Whether to delete source department after merge")
     
-    @validator('target_department_id')
-    def validate_different_departments(cls, v, values):
+    @field_validator('target_department_id')
+    @classmethod
+    def validate_different_departments(cls, v, info):
         """Validate that source and target departments are different."""
-        if 'source_department_id' in values and v == values['source_department_id']:
+        if hasattr(info.data, 'source_department_id') and v == info.data.source_department_id:
             raise ValueError('Source and target departments must be different')
         return v
     

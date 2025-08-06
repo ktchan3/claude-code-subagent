@@ -8,7 +8,7 @@ operations including CRUD and search functionality.
 from datetime import date, datetime
 from typing import List, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, validator, EmailStr
+from pydantic import BaseModel, Field, field_validator, EmailStr
 
 from .common import BaseSchema, TimestampSchema, get_uuid_field, get_name_field, get_optional_text_field
 
@@ -18,6 +18,18 @@ class PersonBase(BaseSchema):
     
     first_name: str = get_name_field("Person's first name", example="John")
     last_name: str = get_name_field("Person's last name", example="Doe")
+    title: Optional[str] = Field(
+        None,
+        max_length=20,
+        description="Person's title (Mr., Ms., Dr., etc.)",
+        example="Mr."
+    )
+    suffix: Optional[str] = Field(
+        None,
+        max_length=20,
+        description="Person's suffix (Jr., Sr., III, etc.)",
+        example="Jr."
+    )
     email: EmailStr = Field(..., description="Person's email address", example="john.doe@example.com")
     phone: Optional[str] = Field(
         None,
@@ -25,10 +37,28 @@ class PersonBase(BaseSchema):
         description="Person's phone number",
         example="+1-555-123-4567"
     )
-    date_of_birth: Optional[date] = Field(
+    mobile: Optional[str] = Field(
         None,
-        description="Person's date of birth",
-        example="1990-01-15"
+        max_length=20,
+        description="Person's mobile number",
+        example="+1-555-987-6543"
+    )
+    date_of_birth: Optional[str] = Field(
+        None,
+        description="Person's date of birth in dd-mm-yyyy format",
+        example="15-01-1990"
+    )
+    gender: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Person's gender",
+        example="Male"
+    )
+    marital_status: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Person's marital status",
+        example="Single"
     )
     address: Optional[str] = get_optional_text_field("Street address", 255, example="123 Main St")
     city: Optional[str] = Field(
@@ -55,15 +85,66 @@ class PersonBase(BaseSchema):
         description="Country",
         example="United States"
     )
+    emergency_contact_name: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="Emergency contact name",
+        example="Jane Doe"
+    )
+    emergency_contact_phone: Optional[str] = Field(
+        None,
+        max_length=20,
+        description="Emergency contact phone",
+        example="+1-555-111-2222"
+    )
+    notes: Optional[str] = Field(
+        None,
+        description="Additional notes",
+        example="Important client"
+    )
+    tags: Optional[List[str]] = Field(
+        None,
+        description="Tags for categorization",
+        example=["VIP", "Client"]
+    )
+    status: Optional[str] = Field(
+        "Active",
+        max_length=20,
+        description="Person's status",
+        example="Active"
+    )
     
-    @validator('date_of_birth')
+    @field_validator('date_of_birth')
+    @classmethod
     def validate_birth_date(cls, v):
-        """Validate that birth date is not in the future."""
-        if v and v > date.today():
-            raise ValueError('Date of birth cannot be in the future')
-        return v
+        """Validate and parse date of birth from dd-mm-yyyy format."""
+        if not v:
+            return None
+        
+        try:
+            from datetime import datetime
+            # Parse dd-mm-yyyy format
+            parsed_date = datetime.strptime(v, '%d-%m-%Y').date()
+            
+            # Check if date is in the future
+            if parsed_date > date.today():
+                raise ValueError('Date of birth cannot be in the future')
+                
+            return parsed_date
+        except ValueError as e:
+            if 'Date of birth cannot be in the future' in str(e):
+                raise e
+            # Try ISO format as fallback
+            try:
+                parsed_date = datetime.fromisoformat(v).date()
+                if parsed_date > date.today():
+                    raise ValueError('Date of birth cannot be in the future')
+                return parsed_date
+            except ValueError:
+                raise ValueError('Date must be in dd-mm-yyyy format (e.g., 15-01-1990)')
     
-    @validator('phone')
+    @field_validator('phone', 'mobile', 'emergency_contact_phone')
+    @classmethod
     def validate_phone(cls, v):
         """Basic phone number validation."""
         if v:
@@ -73,7 +154,46 @@ class PersonBase(BaseSchema):
                 raise ValueError('Phone number must contain 10-15 digits')
         return v
     
-    @validator('email')
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        """Validate status field."""
+        if v:
+            valid_statuses = ["Active", "Inactive", "Pending", "Archived"]
+            if v not in valid_statuses:
+                raise ValueError(f'Status must be one of: {", ".join(valid_statuses)}')
+        return v
+    
+    @field_validator('gender')
+    @classmethod 
+    def validate_gender(cls, v):
+        """Validate gender field."""
+        if v:
+            valid_genders = ["Male", "Female", "Other", "Prefer not to say"]
+            if v not in valid_genders:
+                raise ValueError(f'Gender must be one of: {", ".join(valid_genders)}')
+        return v
+    
+    @field_validator('marital_status')
+    @classmethod
+    def validate_marital_status(cls, v):
+        """Validate marital status field."""
+        if v:
+            valid_statuses = ["Single", "Married", "Divorced", "Widowed", "Separated"]
+            if v not in valid_statuses:
+                raise ValueError(f'Marital status must be one of: {", ".join(valid_statuses)}')
+        return v
+    
+    @field_validator('title', 'suffix')
+    @classmethod
+    def validate_title_suffix_empty_to_none(cls, v):
+        """Convert empty strings to None for title and suffix."""
+        if v is not None and v.strip() == '':
+            return None
+        return v.strip() if v else v
+
+    @field_validator('email')
+    @classmethod
     def validate_email_format(cls, v):
         """Additional email validation."""
         if v:
@@ -116,23 +236,56 @@ class PersonUpdate(BaseSchema):
         max_length=100,
         description="Person's last name"
     )
+    title: Optional[str] = Field(None, max_length=20, description="Person's title")
+    suffix: Optional[str] = Field(None, max_length=20, description="Person's suffix")
     email: Optional[EmailStr] = Field(None, description="Person's email address")
     phone: Optional[str] = Field(None, max_length=20, description="Person's phone number")
-    date_of_birth: Optional[date] = Field(None, description="Person's date of birth")
+    mobile: Optional[str] = Field(None, max_length=20, description="Person's mobile number")
+    date_of_birth: Optional[str] = Field(None, description="Person's date of birth in dd-mm-yyyy format")
+    gender: Optional[str] = Field(None, max_length=50, description="Person's gender")
+    marital_status: Optional[str] = Field(None, max_length=50, description="Person's marital status")
     address: Optional[str] = Field(None, max_length=255, description="Street address")
     city: Optional[str] = Field(None, max_length=100, description="City")
     state: Optional[str] = Field(None, max_length=50, description="State or province")
     zip_code: Optional[str] = Field(None, max_length=20, description="ZIP or postal code")
     country: Optional[str] = Field(None, max_length=100, description="Country")
+    emergency_contact_name: Optional[str] = Field(None, max_length=200, description="Emergency contact name")
+    emergency_contact_phone: Optional[str] = Field(None, max_length=20, description="Emergency contact phone")
+    notes: Optional[str] = Field(None, description="Additional notes")
+    tags: Optional[List[str]] = Field(None, description="Tags for categorization")
+    status: Optional[str] = Field(None, max_length=20, description="Person's status")
     
-    @validator('date_of_birth')
+    @field_validator('date_of_birth')
+    @classmethod
     def validate_birth_date(cls, v):
-        """Validate that birth date is not in the future."""
-        if v and v > date.today():
-            raise ValueError('Date of birth cannot be in the future')
-        return v
+        """Validate and parse date of birth from dd-mm-yyyy format."""
+        if not v:
+            return None
+        
+        try:
+            from datetime import datetime
+            # Parse dd-mm-yyyy format
+            parsed_date = datetime.strptime(v, '%d-%m-%Y').date()
+            
+            # Check if date is in the future
+            if parsed_date > date.today():
+                raise ValueError('Date of birth cannot be in the future')
+                
+            return parsed_date
+        except ValueError as e:
+            if 'Date of birth cannot be in the future' in str(e):
+                raise e
+            # Try ISO format as fallback
+            try:
+                parsed_date = datetime.fromisoformat(v).date()
+                if parsed_date > date.today():
+                    raise ValueError('Date of birth cannot be in the future')
+                return parsed_date
+            except ValueError:
+                raise ValueError('Date must be in dd-mm-yyyy format (e.g., 15-01-1990)')
     
-    @validator('phone')
+    @field_validator('phone', 'mobile', 'emergency_contact_phone')
+    @classmethod
     def validate_phone(cls, v):
         """Basic phone number validation."""
         if v:
@@ -141,7 +294,46 @@ class PersonUpdate(BaseSchema):
                 raise ValueError('Phone number must contain 10-15 digits')
         return v
     
-    @validator('email')
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        """Validate status field."""
+        if v:
+            valid_statuses = ["Active", "Inactive", "Pending", "Archived"]
+            if v not in valid_statuses:
+                raise ValueError(f'Status must be one of: {", ".join(valid_statuses)}')
+        return v
+    
+    @field_validator('gender')
+    @classmethod 
+    def validate_gender(cls, v):
+        """Validate gender field."""
+        if v:
+            valid_genders = ["Male", "Female", "Other", "Prefer not to say"]
+            if v not in valid_genders:
+                raise ValueError(f'Gender must be one of: {", ".join(valid_genders)}')
+        return v
+    
+    @field_validator('marital_status')
+    @classmethod
+    def validate_marital_status(cls, v):
+        """Validate marital status field."""
+        if v:
+            valid_statuses = ["Single", "Married", "Divorced", "Widowed", "Separated"]
+            if v not in valid_statuses:
+                raise ValueError(f'Marital status must be one of: {", ".join(valid_statuses)}')
+        return v
+    
+    @field_validator('title', 'suffix')
+    @classmethod
+    def validate_title_suffix_empty_to_none(cls, v):
+        """Convert empty strings to None for title and suffix."""
+        if v is not None and v.strip() == '':
+            return None
+        return v.strip() if v else v
+
+    @field_validator('email')
+    @classmethod
     def validate_email_format(cls, v):
         """Additional email validation."""
         if v:
@@ -338,7 +530,8 @@ class PersonContactUpdate(BaseSchema):
     email: Optional[EmailStr] = Field(None, description="Person's email address")
     phone: Optional[str] = Field(None, max_length=20, description="Person's phone number")
     
-    @validator('phone')
+    @field_validator('phone')
+    @classmethod
     def validate_phone(cls, v):
         """Basic phone number validation."""
         if v:

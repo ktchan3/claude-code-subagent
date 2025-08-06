@@ -8,7 +8,9 @@ with support for environment variables and default values.
 import os
 from functools import lru_cache
 from typing import List, Optional
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, ConfigDict
+from pydantic_settings import BaseSettings
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -96,35 +98,40 @@ class Settings(BaseSettings):
     # Health check settings
     health_check_interval: int = Field(default=30, description="Health check interval in seconds")
     
-    @validator("cors_origins", pre=True)
+    @field_validator("cors_origins", mode="before")
+    @classmethod
     def assemble_cors_origins(cls, v):
         """Parse CORS origins from environment variable."""
         if isinstance(v, str):
             return [i.strip() for i in v.split(",")]
         return v
     
-    @validator("cors_methods", pre=True) 
+    @field_validator("cors_methods", mode="before")
+    @classmethod
     def assemble_cors_methods(cls, v):
         """Parse CORS methods from environment variable."""
         if isinstance(v, str):
             return [i.strip() for i in v.split(",")]
         return v
     
-    @validator("cors_headers", pre=True)
+    @field_validator("cors_headers", mode="before")
+    @classmethod
     def assemble_cors_headers(cls, v):
         """Parse CORS headers from environment variable."""
         if isinstance(v, str):
             return [i.strip() for i in v.split(",")]
         return v
     
-    @validator("allowed_file_types", pre=True)
+    @field_validator("allowed_file_types", mode="before")
+    @classmethod
     def assemble_allowed_file_types(cls, v):
         """Parse allowed file types from environment variable."""
         if isinstance(v, str):
             return [i.strip() for i in v.split(",")]
         return v
     
-    @validator("log_level")
+    @field_validator("log_level")
+    @classmethod
     def validate_log_level(cls, v):
         """Validate log level."""
         valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -132,24 +139,27 @@ class Settings(BaseSettings):
             raise ValueError(f"Log level must be one of: {valid_levels}")
         return v.upper()
     
-    @validator("port")
+    @field_validator("port")
+    @classmethod
     def validate_port(cls, v):
         """Validate port number."""
         if not 1 <= v <= 65535:
             raise ValueError("Port must be between 1 and 65535")
         return v
     
-    @validator("default_page_size", "max_page_size")
+    @field_validator("default_page_size", "max_page_size")
+    @classmethod
     def validate_page_sizes(cls, v):
         """Validate pagination sizes."""
         if v <= 0:
             raise ValueError("Page size must be greater than 0")
         return v
     
-    class Config:
-        env_file = ".env"
-        env_prefix = "APP_"
-        case_sensitive = False
+    model_config = ConfigDict(
+        env_file=".env",
+        env_prefix="APP_",
+        case_sensitive=False
+    )
 
 
 class TestSettings(Settings):
