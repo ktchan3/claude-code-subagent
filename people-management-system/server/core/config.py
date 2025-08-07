@@ -308,7 +308,6 @@ def print_startup_info():
     print(f"📝 {settings.app_description}")
     print(f"🌐 Server: http://{settings.host}:{settings.port}")
     print(f"📚 Docs: http://{settings.host}:{settings.port}{settings.docs_url}")
-    print(f"🔧 Debug mode: {settings.debug}")
     print(f"💾 Database: {settings.database_url}")
     print(f"📊 Log level: {settings.log_level}")
     print(f"🌍 CORS origins: {', '.join(settings.cors_origins)}")
