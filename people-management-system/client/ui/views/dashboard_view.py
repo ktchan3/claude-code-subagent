@@ -95,8 +95,11 @@ class DashboardView(QWidget):
         self.setup_connections()
         self.start_auto_refresh()
         
-        # Load initial data
-        self.refresh_data()
+        # Delay initial data loading to allow connection to be established
+        self.initial_load_timer = QTimer()
+        self.initial_load_timer.setSingleShot(True)
+        self.initial_load_timer.timeout.connect(self.initial_data_load)
+        self.initial_load_timer.start(500)  # Wait 500ms for connection to be established
     
     def setup_ui(self):
         """Set up the user interface."""
@@ -290,13 +293,36 @@ class DashboardView(QWidget):
         # Refresh every 2 minutes
         self.refresh_timer.start(120000)
     
+    def initial_data_load(self):
+        """Load initial data with connection retry logic."""
+        # Test connection first if needed
+        if not self.api_service.is_connected:
+            self.api_service.test_connection_async()
+        
+        # Load data regardless of connection status - let the API service handle it
+        self.refresh_data()
+        
+        # If still not connected, try again in 2 seconds
+        if not self.api_service.is_connected:
+            retry_timer = QTimer()
+            retry_timer.setSingleShot(True)
+            retry_timer.timeout.connect(self.refresh_data)
+            retry_timer.start(2000)
+    
     def refresh_data(self):
         """Refresh dashboard data."""
-        if self.api_service.is_connected:
-            self.stats_loading.setVisible(True)
+        # Always try to load data - the API service will handle connection errors gracefully
+        self.stats_loading.setVisible(True)
+        
+        try:
             self.api_service.get_statistics_async()
-        else:
-            self.show_disconnected_state()
+        except Exception as e:
+            logger.warning(f"Failed to load statistics: {e}")
+            # If loading fails, show disconnected state after a brief delay
+            disconnect_timer = QTimer()
+            disconnect_timer.setSingleShot(True)
+            disconnect_timer.timeout.connect(self.show_disconnected_state)
+            disconnect_timer.start(1000)
     
     def refresh_activity(self):
         """Refresh recent activity."""
@@ -404,8 +430,10 @@ class DashboardView(QWidget):
     def showEvent(self, event):
         """Handle show event."""
         super().showEvent(event)
-        # Refresh data when view becomes visible
-        if self.api_service.is_connected:
+        # Refresh data when view becomes visible, but only if we don't have any data yet
+        # or if we're showing disconnected state
+        if (self.stats_data is None or 
+            self.people_card.value_label.text() in ["0", "—"]):
             self.refresh_data()
     
     def hideEvent(self, event):

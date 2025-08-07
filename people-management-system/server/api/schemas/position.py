@@ -36,7 +36,7 @@ class PositionCreate(PositionBase):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "title": "Software Engineer",
                 "description": "Responsible for developing and maintaining software applications using modern technologies",
@@ -70,7 +70,7 @@ class PositionUpdate(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "title": "Senior Software Engineer",
                 "description": "Updated description for senior-level responsibilities"
@@ -87,7 +87,7 @@ class PositionResponse(PositionBase, TimestampSchema):
     employee_count: int = Field(..., ge=0, description="Number of active employees in this position")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "456e7890-e12b-34d5-a678-426614174111",
                 "title": "Software Engineer",
@@ -110,7 +110,7 @@ class PositionSummary(BaseSchema):
     employee_count: int = Field(..., ge=0, description="Number of active employees")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "456e7890-e12b-34d5-a678-426614174111",
                 "title": "Software Engineer",
@@ -126,7 +126,7 @@ class PositionWithEmployees(PositionResponse):
     employees: List[dict] = Field(default_factory=list, description="List of employees in this position")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "456e7890-e12b-34d5-a678-426614174111",
                 "title": "Software Engineer",
@@ -165,7 +165,7 @@ class PositionWithHistory(PositionResponse):
     past_employees: List[dict] = Field(default_factory=list, description="Past employees")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "456e7890-e12b-34d5-a678-426614174111",
                 "title": "Software Engineer",
@@ -210,7 +210,7 @@ class PositionStatistics(BaseSchema):
     turnover_rate: Optional[float] = Field(None, ge=0, le=100, description="Employee turnover rate percentage")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "456e7890-e12b-34d5-a678-426614174111",
                 "title": "Software Engineer",
@@ -259,7 +259,7 @@ class PositionSearch(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "title": "engineer",
                 "department": "Engineering",
@@ -274,13 +274,13 @@ class PositionBulkCreate(BaseSchema):
     
     positions: List[PositionCreate] = Field(
         ...,
-        min_items=1,
-        max_items=50,
+        min_length=1,
+        max_length=50,
         description="List of positions to create"
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "positions": [
                     {
@@ -303,13 +303,13 @@ class PositionBulkUpdate(BaseSchema):
     
     updates: List[dict] = Field(
         ...,
-        min_items=1,
-        max_items=50,
+        min_length=1,
+        max_length=50,
         description="List of position updates with ID and fields to update"
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "updates": [
                     {
@@ -352,7 +352,7 @@ class PositionTransfer(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "new_department_id": "987fcdeb-51a2-43d1-9c45-123456789abc",
                 "transfer_employees": True,
@@ -380,7 +380,7 @@ class PositionClone(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "new_title": "Junior Software Engineer",
                 "new_department_id": "123e4567-e89b-12d3-a456-426614174000",

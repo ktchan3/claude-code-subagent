@@ -460,7 +460,7 @@ async def get_tenure_statistics(
 )
 async def get_hiring_trends(
     date_range: DateRangeParams = Depends(get_date_range_params),
-    group_by: str = Query("month", regex="^(month|quarter|year)$", description="Group results by time period"),
+    group_by: str = Query("month", pattern="^(month|quarter|year)$", description="Group results by time period"),
     db: Session = Depends(get_database_session)
 ) -> Dict[str, Any]:
     """Get hiring trends over time."""

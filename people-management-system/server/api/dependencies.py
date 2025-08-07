@@ -102,7 +102,7 @@ class SearchParams:
         self,
         q: Optional[str] = Query(None, min_length=1, max_length=100, description="Search query"),
         sort_by: Optional[str] = Query(None, description="Field to sort by"),
-        sort_order: str = Query("asc", regex="^(asc|desc)$", description="Sort order (asc or desc)")
+        sort_order: str = Query("asc", pattern="^(asc|desc)$", description="Sort order (asc or desc)")
     ):
         self.query = q.strip() if q else None
         self.sort_by = sort_by

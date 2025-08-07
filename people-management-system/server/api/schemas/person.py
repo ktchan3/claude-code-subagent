@@ -6,14 +6,15 @@ operations including CRUD and search functionality.
 """
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field, field_validator, EmailStr
 
 from .common import BaseSchema, TimestampSchema, get_uuid_field, get_name_field, get_optional_text_field
+from ..utils.validators import PersonValidatorMixin
 
 
-class PersonBase(BaseSchema):
+class PersonBase(BaseSchema, PersonValidatorMixin):
     """Base person schema with common fields."""
     
     first_name: str = get_name_field("Person's first name", example="John")
@@ -114,98 +115,14 @@ class PersonBase(BaseSchema):
         example="Active"
     )
     
-    @field_validator('date_of_birth')
-    @classmethod
-    def validate_birth_date(cls, v):
-        """Validate and parse date of birth from dd-mm-yyyy format."""
-        if not v:
-            return None
-        
-        try:
-            from datetime import datetime
-            # Parse dd-mm-yyyy format
-            parsed_date = datetime.strptime(v, '%d-%m-%Y').date()
-            
-            # Check if date is in the future
-            if parsed_date > date.today():
-                raise ValueError('Date of birth cannot be in the future')
-                
-            return parsed_date
-        except ValueError as e:
-            if 'Date of birth cannot be in the future' in str(e):
-                raise e
-            # Try ISO format as fallback
-            try:
-                parsed_date = datetime.fromisoformat(v).date()
-                if parsed_date > date.today():
-                    raise ValueError('Date of birth cannot be in the future')
-                return parsed_date
-            except ValueError:
-                raise ValueError('Date must be in dd-mm-yyyy format (e.g., 15-01-1990)')
-    
-    @field_validator('phone', 'mobile', 'emergency_contact_phone')
-    @classmethod
-    def validate_phone(cls, v):
-        """Basic phone number validation."""
-        if v:
-            # Remove all non-digit characters for validation
-            digits = ''.join(filter(str.isdigit, v))
-            if len(digits) < 10 or len(digits) > 15:
-                raise ValueError('Phone number must contain 10-15 digits')
-        return v
-    
-    @field_validator('status')
-    @classmethod
-    def validate_status(cls, v):
-        """Validate status field."""
-        if v:
-            valid_statuses = ["Active", "Inactive", "Pending", "Archived"]
-            if v not in valid_statuses:
-                raise ValueError(f'Status must be one of: {", ".join(valid_statuses)}')
-        return v
-    
-    @field_validator('gender')
-    @classmethod 
-    def validate_gender(cls, v):
-        """Validate gender field."""
-        if v:
-            valid_genders = ["Male", "Female", "Other", "Prefer not to say"]
-            if v not in valid_genders:
-                raise ValueError(f'Gender must be one of: {", ".join(valid_genders)}')
-        return v
-    
-    @field_validator('marital_status')
-    @classmethod
-    def validate_marital_status(cls, v):
-        """Validate marital status field."""
-        if v:
-            valid_statuses = ["Single", "Married", "Divorced", "Widowed", "Separated"]
-            if v not in valid_statuses:
-                raise ValueError(f'Marital status must be one of: {", ".join(valid_statuses)}')
-        return v
-    
-    @field_validator('title', 'suffix')
-    @classmethod
-    def validate_title_suffix_empty_to_none(cls, v):
-        """Convert empty strings to None for title and suffix."""
-        if v is not None and v.strip() == '':
-            return None
-        return v.strip() if v else v
-
-    @field_validator('email')
-    @classmethod
-    def validate_email_format(cls, v):
-        """Additional email validation."""
-        if v:
-            return v.lower().strip()
-        return v
+    # Validation methods are now inherited from PersonValidatorMixin
 
 
 class PersonCreate(PersonBase):
     """Schema for creating a new person."""
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "first_name": "John",
                 "last_name": "Doe",
@@ -221,7 +138,7 @@ class PersonCreate(PersonBase):
         }
 
 
-class PersonUpdate(BaseSchema):
+class PersonUpdate(BaseSchema, PersonValidatorMixin):
     """Schema for updating a person."""
     
     first_name: Optional[str] = Field(
@@ -255,93 +172,10 @@ class PersonUpdate(BaseSchema):
     tags: Optional[List[str]] = Field(None, description="Tags for categorization")
     status: Optional[str] = Field(None, max_length=20, description="Person's status")
     
-    @field_validator('date_of_birth')
-    @classmethod
-    def validate_birth_date(cls, v):
-        """Validate and parse date of birth from dd-mm-yyyy format."""
-        if not v:
-            return None
-        
-        try:
-            from datetime import datetime
-            # Parse dd-mm-yyyy format
-            parsed_date = datetime.strptime(v, '%d-%m-%Y').date()
-            
-            # Check if date is in the future
-            if parsed_date > date.today():
-                raise ValueError('Date of birth cannot be in the future')
-                
-            return parsed_date
-        except ValueError as e:
-            if 'Date of birth cannot be in the future' in str(e):
-                raise e
-            # Try ISO format as fallback
-            try:
-                parsed_date = datetime.fromisoformat(v).date()
-                if parsed_date > date.today():
-                    raise ValueError('Date of birth cannot be in the future')
-                return parsed_date
-            except ValueError:
-                raise ValueError('Date must be in dd-mm-yyyy format (e.g., 15-01-1990)')
-    
-    @field_validator('phone', 'mobile', 'emergency_contact_phone')
-    @classmethod
-    def validate_phone(cls, v):
-        """Basic phone number validation."""
-        if v:
-            digits = ''.join(filter(str.isdigit, v))
-            if len(digits) < 10 or len(digits) > 15:
-                raise ValueError('Phone number must contain 10-15 digits')
-        return v
-    
-    @field_validator('status')
-    @classmethod
-    def validate_status(cls, v):
-        """Validate status field."""
-        if v:
-            valid_statuses = ["Active", "Inactive", "Pending", "Archived"]
-            if v not in valid_statuses:
-                raise ValueError(f'Status must be one of: {", ".join(valid_statuses)}')
-        return v
-    
-    @field_validator('gender')
-    @classmethod 
-    def validate_gender(cls, v):
-        """Validate gender field."""
-        if v:
-            valid_genders = ["Male", "Female", "Other", "Prefer not to say"]
-            if v not in valid_genders:
-                raise ValueError(f'Gender must be one of: {", ".join(valid_genders)}')
-        return v
-    
-    @field_validator('marital_status')
-    @classmethod
-    def validate_marital_status(cls, v):
-        """Validate marital status field."""
-        if v:
-            valid_statuses = ["Single", "Married", "Divorced", "Widowed", "Separated"]
-            if v not in valid_statuses:
-                raise ValueError(f'Marital status must be one of: {", ".join(valid_statuses)}')
-        return v
-    
-    @field_validator('title', 'suffix')
-    @classmethod
-    def validate_title_suffix_empty_to_none(cls, v):
-        """Convert empty strings to None for title and suffix."""
-        if v is not None and v.strip() == '':
-            return None
-        return v.strip() if v else v
-
-    @field_validator('email')
-    @classmethod
-    def validate_email_format(cls, v):
-        """Additional email validation."""
-        if v:
-            return v.lower().strip()
-        return v
+    # Validation methods are now inherited from PersonValidatorMixin
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "first_name": "Jane",
                 "email": "jane.doe@example.com",
@@ -358,7 +192,7 @@ class PersonResponse(PersonBase, TimestampSchema):
     age: Optional[int] = Field(None, ge=0, le=150, description="Person's age in years")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "first_name": "John",
@@ -389,7 +223,7 @@ class PersonSummary(BaseSchema):
     current_department: Optional[str] = Field(None, description="Current department name")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "full_name": "John Doe",
@@ -407,7 +241,7 @@ class PersonWithEmployment(PersonResponse):
     employment_history: List[dict] = Field(default_factory=list, description="Employment history")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "first_name": "John",
@@ -443,7 +277,7 @@ class PersonSearch(BaseSchema):
     active_only: Optional[bool] = Field(True, description="Show only active employees")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "name": "john",
                 "department": "Engineering",
@@ -455,10 +289,10 @@ class PersonSearch(BaseSchema):
 class PersonBulkCreate(BaseSchema):
     """Schema for bulk person creation."""
     
-    people: List[PersonCreate] = Field(..., min_items=1, max_items=100, description="List of people to create")
+    people: List[dict] = Field(..., min_length=1, max_length=100, description="List of people to create")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "people": [
                     {
@@ -481,13 +315,13 @@ class PersonBulkUpdate(BaseSchema):
     
     updates: List[dict] = Field(
         ...,
-        min_items=1,
-        max_items=100,
+        min_length=1,
+        max_length=100,
         description="List of person updates with ID and fields to update"
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "updates": [
                     {
@@ -514,7 +348,7 @@ class PersonAddressUpdate(BaseSchema):
     country: Optional[str] = Field(None, max_length=100, description="Country")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "address": "456 Oak Ave",
                 "city": "San Francisco",
@@ -532,16 +366,17 @@ class PersonContactUpdate(BaseSchema):
     
     @field_validator('phone')
     @classmethod
-    def validate_phone(cls, v):
+    def validate_phone(cls, v: Any) -> Optional[str]:
         """Basic phone number validation."""
         if v:
+            # Remove all non-digit characters for validation
             digits = ''.join(filter(str.isdigit, v))
             if len(digits) < 10 or len(digits) > 15:
                 raise ValueError('Phone number must contain 10-15 digits')
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "email": "john.doe@newcompany.com",
                 "phone": "+1-555-111-2222"

@@ -366,8 +366,10 @@ class PeopleManagementClient:
         if search:
             if isinstance(search, SearchParams):
                 search_params = search.dict(exclude_none=True)
-                if search_params.get("sort_desc"):
-                    search_params["sort_desc"] = "true"
+                # Convert sort_desc boolean to sort_order string that server expects
+                if "sort_desc" in search_params:
+                    sort_desc = search_params.pop("sort_desc")  # Remove sort_desc
+                    search_params["sort_order"] = "desc" if sort_desc else "asc"  # Add sort_order
                 params.update(search_params)
             else:
                 params.update(search)

@@ -54,7 +54,7 @@ class EmploymentCreate(EmploymentBase):
     position_id: UUID = get_uuid_field(description="ID of the position being filled")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "person_id": "111e1111-e11b-11d1-a111-426614174111",
                 "position_id": "456e7890-e12b-34d5-a678-426614174111",
@@ -88,7 +88,7 @@ class EmploymentUpdate(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "salary": 95000.00,
                 "position_id": "789e0123-e45b-67d8-a901-426614174222"
@@ -116,7 +116,7 @@ class EmploymentTerminate(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "end_date": "2024-01-31",
                 "reason": "Voluntary resignation - accepted position at another company"
@@ -144,7 +144,7 @@ class EmploymentResponse(EmploymentBase, TimestampSchema):
     duration_years: Optional[float] = Field(None, ge=0, description="Employment duration in years")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "555e5555-e55b-55d5-a555-426614174555",
                 "person_id": "111e1111-e11b-11d1-a111-426614174111",
@@ -176,7 +176,7 @@ class EmploymentSummary(BaseSchema):
     is_active: bool = Field(..., description="Whether employment is currently active")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "555e5555-e55b-55d5-a555-426614174555",
                 "person_name": "John Doe",
@@ -199,7 +199,7 @@ class EmploymentHistory(BaseSchema):
     total_tenure_years: float = Field(..., ge=0, description="Total tenure across all employments in years")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "person_id": "111e1111-e11b-11d1-a111-426614174111",
                 "person_name": "John Doe",
@@ -251,7 +251,7 @@ class EmploymentStatistics(BaseSchema):
     position_breakdown: List[dict] = Field(..., description="Employment breakdown by position")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "total_employments": 150,
                 "active_employments": 120,
@@ -345,7 +345,7 @@ class EmploymentSearch(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "department": "Engineering",
                 "is_active": True,
@@ -360,13 +360,13 @@ class EmploymentBulkCreate(BaseSchema):
     
     employments: List[EmploymentCreate] = Field(
         ...,
-        min_items=1,
-        max_items=50,
+        min_length=1,
+        max_length=50,
         description="List of employment records to create"
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "employments": [
                     {
@@ -391,8 +391,8 @@ class EmploymentBulkTerminate(BaseSchema):
     
     employment_ids: List[UUID] = Field(
         ...,
-        min_items=1,
-        max_items=50,
+        min_length=1,
+        max_length=50,
         description="List of employment IDs to terminate"
     )
     end_date: date = Field(..., description="Termination date for all employments")
@@ -411,7 +411,7 @@ class EmploymentBulkTerminate(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "employment_ids": [
                     "555e5555-e55b-55d5-a555-426614174555",
@@ -461,7 +461,7 @@ class EmploymentTransfer(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "new_position_id": "789e0123-e45b-67d8-a901-426614174222",
                 "transfer_date": "2024-02-01",

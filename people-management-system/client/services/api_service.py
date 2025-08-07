@@ -345,6 +345,60 @@ class APIService(QObject):
         )
         worker.start()
     
+    def advanced_search_people(self,
+                              name: Optional[str] = None,
+                              email: Optional[str] = None,
+                              department: Optional[str] = None,
+                              position: Optional[str] = None,
+                              active_only: bool = True,
+                              page: int = 1,
+                              page_size: int = 20,
+                              use_cache: bool = True) -> Dict[str, Any]:
+        """Advanced search for people with multiple filters."""
+        
+        cache_key = self._get_cache_key(
+            'people_advanced_search',
+            name=name,
+            email=email,
+            department=department,
+            position=position,
+            active_only=active_only,
+            page=page,
+            page_size=page_size
+        )
+        
+        # Check cache first
+        if use_cache:
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data:
+                return cached_data
+        
+        # Use the shared API client's advanced search functionality
+        # This would need to be implemented in the shared client
+        result = self.client.advanced_search_people(
+            name=name,
+            email=email,
+            department=department,
+            position=position,
+            active_only=active_only,
+            page=page,
+            page_size=page_size
+        )
+        
+        # Cache result
+        self._set_cached_data(cache_key, result)
+        
+        return result
+    
+    def advanced_search_people_async(self, **kwargs):
+        """Advanced search for people asynchronously."""
+        self.operation_started.emit("Searching people...")
+        worker = self._create_worker(self.advanced_search_people, **kwargs)
+        worker.finished.connect(
+            lambda result: self.data_updated.emit("people", result)
+        )
+        worker.start()
+    
     def get_person(self, person_id: str, use_cache: bool = True) -> Dict[str, Any]:
         """Get person by ID."""
         cache_key = f"person_{person_id}"

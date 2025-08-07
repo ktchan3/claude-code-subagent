@@ -182,17 +182,17 @@ def setup_exception_handlers(app: FastAPI):
         # Get request ID if available
         request_id = getattr(request.state, 'request_id', None)
         
-        # Create standardized error response
-        response = map_http_exception_to_error_response(
+        # Return simple format with 'detail' field that tests expect
+        response_data = {"detail": http_exception.detail}
+        response = JSONResponse(
             status_code=http_exception.status_code,
-            detail=http_exception.detail,
-            request_id=request_id
+            content=response_data
         )
         
         # Add standard headers
         if request_id:
-            response = add_request_id_to_response(response, request_id)
-        response = add_api_version_to_response(response, "1.0.0")
+            response.headers["X-Request-ID"] = request_id
+        response.headers["X-API-Version"] = "1.0.0"
         
         return response
     
@@ -204,17 +204,17 @@ def setup_exception_handlers(app: FastAPI):
         # Get request ID if available
         request_id = getattr(request.state, 'request_id', None)
         
-        # Create standardized error response
-        response = map_http_exception_to_error_response(
+        # Return simple format with 'detail' field that tests expect
+        response_data = {"detail": exc.detail}
+        response = JSONResponse(
             status_code=exc.status_code,
-            detail=exc.detail,
-            request_id=request_id
+            content=response_data
         )
         
         # Add standard headers
         if request_id:
-            response = add_request_id_to_response(response, request_id)
-        response = add_api_version_to_response(response, "1.0.0")
+            response.headers["X-Request-ID"] = request_id
+        response.headers["X-API-Version"] = "1.0.0"
         
         # Add any custom headers from the original exception
         if exc.headers:
@@ -230,17 +230,17 @@ def setup_exception_handlers(app: FastAPI):
         # Get request ID if available
         request_id = getattr(request.state, 'request_id', None)
         
-        # Create standardized error response
-        response = map_http_exception_to_error_response(
+        # Return simple format with 'detail' field that tests expect
+        response_data = {"detail": f"Invalid value: {str(exc)}"}
+        response = JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid value: {str(exc)}",
-            request_id=request_id
+            content=response_data
         )
         
         # Add standard headers
         if request_id:
-            response = add_request_id_to_response(response, request_id)
-        response = add_api_version_to_response(response, "1.0.0")
+            response.headers["X-Request-ID"] = request_id
+        response.headers["X-API-Version"] = "1.0.0"
         
         return response
     
@@ -257,17 +257,17 @@ def setup_exception_handlers(app: FastAPI):
         # In debug mode, include more details
         error_detail = str(exc) if settings.debug else "An internal server error occurred"
         
-        # Create standardized error response
-        response = map_http_exception_to_error_response(
+        # Return simple format with 'detail' field that tests expect
+        response_data = {"detail": error_detail}
+        response = JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=error_detail,
-            request_id=request_id
+            content=response_data
         )
         
         # Add standard headers
         if request_id:
-            response = add_request_id_to_response(response, request_id)
-        response = add_api_version_to_response(response, "1.0.0")
+            response.headers["X-Request-ID"] = request_id
+        response.headers["X-API-Version"] = "1.0.0"
         
         return response
 
@@ -367,10 +367,10 @@ def setup_root_endpoints(app: FastAPI):
             if status_value == "unhealthy":
                 return JSONResponse(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    content=health_response.dict()
+                    content=health_response.model_dump()
                 )
             
-            return health_response.dict()
+            return health_response.model_dump()
             
         except Exception as e:
             logger.error(f"Health check failed: {str(e)}")
@@ -384,7 +384,7 @@ def setup_root_endpoints(app: FastAPI):
             
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                content=error_health.dict()
+                content=error_health.model_dump()
             )
     
     @app.get(
@@ -409,7 +409,7 @@ def setup_root_endpoints(app: FastAPI):
         description="Get detailed system status and metrics.",
         response_model=Dict[str, Any]
     )
-    async def status():
+    async def get_status():
         """System status endpoint."""
         try:
             # Get database health

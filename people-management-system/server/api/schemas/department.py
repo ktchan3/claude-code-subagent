@@ -34,7 +34,7 @@ class DepartmentCreate(DepartmentBase):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "name": "Engineering",
                 "description": "Software development and engineering teams responsible for product development"
@@ -66,7 +66,7 @@ class DepartmentUpdate(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "name": "Software Engineering",
                 "description": "Updated description for the engineering department"
@@ -82,7 +82,7 @@ class DepartmentResponse(DepartmentBase, TimestampSchema):
     active_employee_count: int = Field(..., ge=0, description="Number of active employees in this department")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "name": "Engineering",
@@ -104,7 +104,7 @@ class DepartmentSummary(BaseSchema):
     active_employee_count: int = Field(..., ge=0, description="Number of active employees")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "name": "Engineering",
@@ -120,7 +120,7 @@ class DepartmentWithPositions(DepartmentResponse):
     positions: List[dict] = Field(default_factory=list, description="List of positions in this department")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "name": "Engineering",
@@ -156,7 +156,7 @@ class DepartmentWithEmployees(DepartmentResponse):
     employees: List[dict] = Field(default_factory=list, description="List of employees in this department")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "name": "Engineering",
@@ -200,7 +200,7 @@ class DepartmentStatistics(BaseSchema):
     average_tenure_months: Optional[float] = Field(None, ge=0, description="Average employee tenure in months")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "name": "Engineering",
@@ -236,7 +236,7 @@ class DepartmentSearch(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "name": "eng",
                 "has_employees": True,
@@ -250,13 +250,13 @@ class DepartmentBulkCreate(BaseSchema):
     
     departments: List[DepartmentCreate] = Field(
         ...,
-        min_items=1,
-        max_items=50,
+        min_length=1,
+        max_length=50,
         description="List of departments to create"
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "departments": [
                     {
@@ -281,13 +281,13 @@ class DepartmentBulkUpdate(BaseSchema):
     
     updates: List[dict] = Field(
         ...,
-        min_items=1,
-        max_items=50,
+        min_length=1,
+        max_length=50,
         description="List of department updates with ID and fields to update"
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "updates": [
                     {
@@ -321,7 +321,7 @@ class DepartmentMerge(BaseSchema):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "source_department_id": "123e4567-e89b-12d3-a456-426614174000",
                 "target_department_id": "987fcdeb-51a2-43d1-9c45-123456789abc",

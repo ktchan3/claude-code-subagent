@@ -17,6 +17,7 @@ from sqlalchemy.types import Uuid
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
+from sqlalchemy import event
 
 
 # Base class for all models
@@ -26,8 +27,8 @@ Base = declarative_base()
 class TimestampMixin:
     """Mixin class for created_at and updated_at timestamps."""
     
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class Person(Base, TimestampMixin):
@@ -79,15 +80,18 @@ class Person(Base, TimestampMixin):
         lazy="select"
     )
     
-    # Constraints
+    # Constraints and performance indexes
     __table_args__ = (
         CheckConstraint("length(first_name) > 0", name="check_first_name_not_empty"),
         CheckConstraint("length(last_name) > 0", name="check_last_name_not_empty"),
         CheckConstraint("length(email) > 0", name="check_email_not_empty"),
         # Note: date_of_birth validation is done at application level, not database level
         # SQLite doesn't allow date('now') in CHECK constraints (non-deterministic)
-        Index("idx_person_name", "first_name", "last_name"),
-        Index("idx_person_location", "city", "state", "country"),
+        
+        # Essential indexes for common query patterns
+        Index("idx_person_name_search", "last_name", "first_name"),  # Most common search pattern
+        Index("idx_person_status_active", "status"),  # Status filtering
+        Index("idx_person_created_at", "created_at"),  # Sorting by creation date
     )
     
     @validates('email')
@@ -210,9 +214,12 @@ class Department(Base, TimestampMixin):
         lazy="select"
     )
     
-    # Constraints
+    # Constraints and performance indexes
     __table_args__ = (
         CheckConstraint("length(name) > 0", name="check_department_name_not_empty"),
+        
+        # Essential department indexes
+        Index("idx_department_created", "created_at"),  # For sorting
     )
     
     @validates('name')
@@ -272,11 +279,14 @@ class Position(Base, TimestampMixin):
         lazy="select"
     )
     
-    # Constraints
+    # Constraints and performance indexes
     __table_args__ = (
         CheckConstraint("length(title) > 0", name="check_position_title_not_empty"),
         UniqueConstraint("title", "department_id", name="unique_position_per_department"),
-        Index("idx_position_department", "department_id", "title"),
+        
+        # Essential position indexes
+        Index("idx_position_department_title", "department_id", "title"),  # Most common lookup
+        Index("idx_position_created", "created_at"),  # For sorting
     )
     
     @validates('title')
@@ -337,7 +347,7 @@ class Employment(Base, TimestampMixin):
     person = relationship("Person", back_populates="employments")
     position = relationship("Position", back_populates="employments")
     
-    # Constraints
+    # Constraints and comprehensive performance indexes
     __table_args__ = (
         # Note: Date validation is done at application level, not database level
         # SQLite doesn't allow date('now') in CHECK constraints (non-deterministic)
@@ -346,11 +356,12 @@ class Employment(Base, TimestampMixin):
             "(is_active = 1 AND end_date IS NULL) OR (is_active = 0 AND end_date IS NOT NULL)",
             name="check_active_employment_logic"
         ),
-        # Prevent overlapping active employments for the same person
+        
+        # Essential employment indexes for common queries
         Index("idx_employment_person_active", "person_id", "is_active"),
-        Index("idx_employment_position_active", "position_id", "is_active"),
-        Index("idx_employment_dates", "start_date", "end_date"),
-        Index("idx_employment_salary", "salary"),
+        Index("idx_employment_position_active", "position_id", "is_active"), 
+        Index("idx_employment_active_dates", "is_active", "start_date", "end_date"),  # For active employment queries
+        Index("idx_employment_salary_active", "salary", "is_active"),  # For salary queries
     )
     
     @validates('start_date')
@@ -417,26 +428,25 @@ class Employment(Base, TimestampMixin):
         return f"<Employment(id={self.id}, person='{person_name}', position='{position_title}', status='{status}')>"
 
 
-# Index definitions for optimized queries
-# These indexes support common query patterns in a people management system
+# Optimized indexes for essential query patterns only
+# Removed excessive indexes that hurt write performance
 
-# Indexes for finding people by name (case-insensitive search support)
-Index("idx_person_first_name_lower", func.lower(Person.first_name))
-Index("idx_person_last_name_lower", func.lower(Person.last_name))
+# Case-insensitive search indexes for key fields only
+Index("idx_person_name_search_lower", func.lower(Person.last_name), func.lower(Person.first_name))
 Index("idx_person_email_lower", func.lower(Person.email))
 
-# Indexes for department and position searches
+# Essential search indexes for departments and positions
 Index("idx_department_name_lower", func.lower(Department.name))
 Index("idx_position_title_lower", func.lower(Position.title))
 
-# Composite indexes for complex queries
-Index("idx_employment_person_position", Employment.person_id, Employment.position_id)
-Index("idx_employment_active_dates", Employment.is_active, Employment.start_date, Employment.end_date)
+# Critical reporting index only
+Index("idx_employment_salary_reporting", Employment.salary, Employment.is_active)
 
-# Indexes for reporting and analytics
-Index("idx_person_birth_year", func.strftime("%Y", Person.date_of_birth))
-Index("idx_employment_start_year", func.strftime("%Y", Employment.start_date))
-Index("idx_employment_salary_range", Employment.salary, Employment.is_active)
+# Partial indexes for active records (SQLite and PostgreSQL)
+Index("idx_active_employments_partial", Employment.person_id, Employment.position_id, 
+      postgresql_where=Employment.is_active == True)
+Index("idx_active_people_partial", Person.id, Person.email,
+      postgresql_where=Person.status == 'Active')
 
 
 def get_all_models():
@@ -453,3 +463,28 @@ def get_model_by_name(name: str):
         "Employment": Employment,
     }
     return models.get(name)
+
+
+# Event listeners for timestamp updates
+@event.listens_for(Person, 'before_update')
+def person_before_update(mapper, connection, target):
+    """Update the updated_at timestamp before updating a Person."""
+    target.updated_at = datetime.utcnow()
+
+
+@event.listens_for(Department, 'before_update')
+def department_before_update(mapper, connection, target):
+    """Update the updated_at timestamp before updating a Department."""
+    target.updated_at = datetime.utcnow()
+
+
+@event.listens_for(Position, 'before_update')
+def position_before_update(mapper, connection, target):
+    """Update the updated_at timestamp before updating a Position."""
+    target.updated_at = datetime.utcnow()
+
+
+@event.listens_for(Employment, 'before_update')
+def employment_before_update(mapper, connection, target):
+    """Update the updated_at timestamp before updating an Employment."""
+    target.updated_at = datetime.utcnow()

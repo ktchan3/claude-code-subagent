@@ -15,7 +15,7 @@ from ...core.config import get_settings
 from ..auth import get_admin_api_key, api_key_manager, APIClientInfo, create_api_key_for_client
 from ..responses import create_success_response, create_error_response
 from ..openapi import generate_postman_collection
-from ..middleware import RequestLoggingMiddleware
+# RequestLoggingMiddleware will be checked by duck typing instead of importing
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -235,20 +235,21 @@ async def get_system_stats(
     try:
         from ....main import app  # Import here to avoid circular imports
         
-        # Get middleware statistics if available
+        # Get middleware statistics if available using duck typing
         middleware_stats = {}
-        for middleware in app.user_middleware:
-            if isinstance(middleware.cls, type) and issubclass(middleware.cls, RequestLoggingMiddleware):
-                # Try to get stats from the middleware instance
-                try:
-                    middleware_instance = None
-                    # Find the actual middleware instance
+        try:
+            # Look for middleware with get_client_stats method (RequestLoggingMiddleware)
+            for middleware in app.user_middleware:
+                # Check if the middleware class has the expected method
+                if hasattr(middleware.cls, 'get_client_stats'):
+                    # Try to find the actual middleware instance
                     for middleware_obj in app.middleware_stack:
                         if hasattr(middleware_obj, 'get_client_stats'):
                             middleware_stats = middleware_obj.get_client_stats()
                             break
-                except Exception:
-                    pass
+                    break
+        except Exception:
+            pass
         
         # Get API key statistics
         api_keys = api_key_manager.list_api_keys()

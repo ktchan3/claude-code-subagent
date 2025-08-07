@@ -21,6 +21,7 @@ from client.services.api_service import APIService
 from client.services.config_service import ConfigService
 from client.ui.widgets.data_table import DataTable, ColumnConfig
 from client.ui.widgets.search_widget import SearchWidget, SearchFilter
+from PySide6.QtCore import QTimer
 from client.ui.widgets.person_form import PersonForm
 
 logger = logging.getLogger(__name__)
@@ -338,10 +339,9 @@ class PeopleView(QWidget):
     
     def create_table_section(self):
         """Create the data table section."""
-        # Define table columns - displaying ALL database fields
+        # Define table columns - displaying user-relevant fields (ID hidden but available internally)
         columns = [
-            # Basic Information
-            ColumnConfig('id', 'ID', 100),
+            # Basic Information - ID column removed from display but still available in data
             ColumnConfig('title', 'Title', 60),
             ColumnConfig('first_name', 'First Name', 120),
             ColumnConfig('last_name', 'Last Name', 120),
@@ -440,6 +440,42 @@ class PeopleView(QWidget):
             return text[:97] + "..."
         return text
     
+    def _perform_server_side_search(self, filters: List['SearchFilter']):
+        """Perform server-side search based on current filters."""
+        try:
+            server_params = self.build_server_filters(filters)
+            
+            if self.should_use_advanced_search(filters):
+                # Use advanced search endpoint for complex filters
+                self._perform_advanced_search(server_params)
+            else:
+                # Use regular list endpoint with search parameters
+                self._perform_basic_search(server_params)
+                
+        except Exception as e:
+            logger.error(f"Error performing server-side search: {e}")
+            QMessageBox.warning(self, "Search Error", f"Failed to perform search: {e}")
+    
+    def _perform_basic_search(self, params: Dict[str, Any]):
+        """Perform basic search using list endpoint."""
+        search_params = {
+            'page': self.current_page,
+            'page_size': self.page_size,
+            **params
+        }
+        
+        self.api_service.list_people_async(**search_params)
+    
+    def _perform_advanced_search(self, params: Dict[str, Any]):
+        """Perform advanced search using advanced search endpoint."""
+        search_params = {
+            'page': self.current_page,
+            'page_size': self.page_size,
+            **params
+        }
+        
+        self.api_service.advanced_search_people_async(**search_params)
+    
     def format_tags(self, value: Any) -> str:
         """Format tags for display."""
         if not value:
@@ -462,10 +498,15 @@ class PeopleView(QWidget):
     
     def refresh_data(self):
         """Refresh people data."""
-        self.api_service.list_people_async(
-            page=self.current_page,
-            page_size=self.page_size
-        )
+        if self.current_filters:
+            # If we have active filters, use server-side search
+            self._perform_server_side_search(self.current_filters)
+        else:
+            # Otherwise, use standard list endpoint
+            self.api_service.list_people_async(
+                page=self.current_page,
+                page_size=self.page_size
+            )
     
     def on_data_updated(self, data_type: str, data: Dict[str, Any]):
         """Handle data updates from API service."""
@@ -478,107 +519,77 @@ class PeopleView(QWidget):
             items = data.get('items', [])
             self.current_people = items
             
-            # Apply any current filters
-            filtered_items = self.apply_filters(items)
-            
-            self.data_table.set_data(filtered_items)
+            # Data is already filtered on the server side, no need for client-side filtering
+            self.data_table.set_data(items)
             
         except Exception as e:
             logger.error(f"Error updating people data: {e}")
             QMessageBox.critical(self, "Error", f"Failed to update people data: {e}")
     
-    def apply_filters(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Apply current search filters to items."""
-        if not self.current_filters:
-            return items
+    def build_server_filters(self, filters: List['SearchFilter']) -> Dict[str, Any]:
+        """Convert client-side filters to server-side API parameters."""
+        server_params = {}
         
-        filtered_items = []
-        
-        for item in items:
-            matches = True
+        # Process filters to build server-side query parameters
+        for search_filter in filters:
+            field = search_filter.field
+            value = search_filter.value
             
-            for search_filter in self.current_filters:
-                if not self.item_matches_filter(item, search_filter):
-                    matches = False
-                    break
-            
-            if matches:
-                filtered_items.append(item)
+            if field == '_quick_search':
+                # Quick search maps to the general query parameter
+                server_params['query'] = str(value)
+            elif field in ['first_name', 'last_name']:
+                # Name fields map to the name parameter
+                server_params['name'] = str(value)
+            elif field == 'email':
+                server_params['email'] = str(value)
+            elif field == 'department':
+                # This would need to be handled by the advanced search endpoint
+                server_params['department'] = str(value)
+            elif field == 'position':
+                # This would need to be handled by the advanced search endpoint
+                server_params['position'] = str(value)
+            elif field == 'status':
+                # Status filtering - active_only parameter
+                if str(value).lower() == 'active':
+                    server_params['active_only'] = True
+                elif str(value).lower() == 'inactive':
+                    server_params['active_only'] = False
         
-        return filtered_items
+        return server_params
     
-    def item_matches_filter(self, item: Dict[str, Any], search_filter: SearchFilter) -> bool:
-        """Check if an item matches a search filter."""
-        field_value = item.get(search_filter.field, '')
-        filter_value = search_filter.value
-        
-        if field_value is None:
-            field_value = ''
-        
-        # Handle quick search
-        if search_filter.field == '_quick_search':
-            # Search across multiple key fields
-            search_fields = [
-                'first_name', 'last_name', 'title', 'suffix', 'email', 
-                'phone', 'mobile', 'city', 'state', 'country',
-                'emergency_contact_name', 'notes', 'tags'
-            ]
-            query = str(filter_value).lower()
-            
-            return any(
-                query in str(item.get(field, '')).lower()
-                for field in search_fields
-            )
-        
-        # Handle specific field filters
-        if search_filter.field_type == 'text':
-            field_str = str(field_value).lower()
-            filter_str = str(filter_value).lower()
-            
-            if search_filter.operator == 'contains':
-                return filter_str in field_str
-            elif search_filter.operator == 'equals':
-                return field_str == filter_str
-            elif search_filter.operator == 'starts_with':
-                return field_str.startswith(filter_str)
-            elif search_filter.operator == 'ends_with':
-                return field_str.endswith(filter_str)
-            elif search_filter.operator == 'not_contains':
-                return filter_str not in field_str
-            elif search_filter.operator == 'not_equals':
-                return field_str != filter_str
-        
-        elif search_filter.field_type == 'choice':
-            if search_filter.operator == 'equals':
-                return field_value == filter_value
-            elif search_filter.operator == 'not_equals':
-                return field_value != filter_value
-        
-        # Add more filter type handling as needed
-        
-        return True
+    def should_use_advanced_search(self, filters: List['SearchFilter']) -> bool:
+        """Determine if we need to use the advanced search endpoint."""
+        # Use advanced search if we have filters that require it
+        advanced_fields = ['department', 'position']
+        return any(f.field in advanced_fields for f in filters)
     
-    def on_search_requested(self, filters: List[SearchFilter]):
-        """Handle search request."""
+    def on_search_requested(self, filters: List['SearchFilter']):
+        """Handle search request with server-side filtering."""
         self.current_filters = filters
         self.current_page = 1
         
-        # Apply filters to current data
-        filtered_items = self.apply_filters(self.current_people)
-        self.data_table.set_data(filtered_items)
+        # Perform server-side search
+        self._perform_server_side_search(filters)
     
-    def on_filters_changed(self, filters: List[SearchFilter]):
-        """Handle real-time filter changes."""
+    def on_filters_changed(self, filters: List['SearchFilter']):
+        """Handle real-time filter changes with server-side filtering."""
         self.current_filters = filters
         
-        # Apply filters to current data
-        filtered_items = self.apply_filters(self.current_people)
-        self.data_table.set_data(filtered_items)
+        # Perform server-side search with debouncing to avoid too many API calls
+        if hasattr(self, '_filter_timer'):
+            self._filter_timer.stop()
+        
+        self._filter_timer = QTimer()
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.timeout.connect(lambda: self._perform_server_side_search(filters))
+        self._filter_timer.start(500)  # 500ms debounce
     
     def on_search_cleared(self):
         """Handle search cleared."""
         self.current_filters = []
-        self.data_table.set_data(self.current_people)
+        # Refresh with no filters
+        self.refresh_data()
     
     def on_person_selected(self, person_data: Dict[str, Any]):
         """Handle person selection."""

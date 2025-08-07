@@ -60,7 +60,7 @@ async def create_department(
             raise DepartmentNameExistsError(department_data.name)
         
         # Create new department
-        db_department = Department(**department_data.dict())
+        db_department = Department(**department_data.model_dump())
         db.add(db_department)
         db.commit()
         db.refresh(db_department)
@@ -212,7 +212,7 @@ async def get_department_with_positions(
             positions_data.append(position_data)
         
         # Create response data
-        dept_data = DepartmentResponse.from_orm(department).dict()
+        dept_data = DepartmentResponse.from_orm(department).model_dump()
         dept_data["positions"] = positions_data
         
         return DepartmentWithPositions(**dept_data)
@@ -270,7 +270,7 @@ async def get_department_with_employees(
             employees_data.append(employee_data)
         
         # Create response data
-        dept_data = DepartmentResponse.from_orm(department).dict()
+        dept_data = DepartmentResponse.from_orm(department).model_dump()
         dept_data["employees"] = employees_data
         
         return DepartmentWithEmployees(**dept_data)
@@ -370,7 +370,7 @@ async def update_department(
                 raise DepartmentNameExistsError(department_data.name)
         
         # Update department fields
-        update_data = department_data.dict(exclude_unset=True)
+        update_data = department_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(department, field, value)
         
@@ -564,7 +564,7 @@ async def bulk_create_departments(
                     continue
                 
                 # Create department
-                db_department = Department(**dept_data.dict())
+                db_department = Department(**dept_data.model_dump())
                 db.add(db_department)
                 db.flush()  # Get ID without committing
                 

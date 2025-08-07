@@ -10,12 +10,15 @@ from contextlib import contextmanager
 from typing import Generator, Optional
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, Engine
+from sqlalchemy import create_engine, event, Engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
 from sqlalchemy.pool import StaticPool
 
-from .config import get_database_url, get_engine_kwargs, ensure_database_directory
+from .config import (
+    get_database_url, get_engine_kwargs, ensure_database_directory, 
+    get_database_settings
+)
 from .models import Base
 
 
@@ -33,27 +36,36 @@ def configure_sqlite_pragmas(dbapi_connection, connection_record):
     Configure SQLite-specific pragmas for optimal performance and reliability.
     
     This function is called for each new SQLite connection to set important
-    database configuration options.
+    database configuration options dynamically based on settings.
     """
     cursor = dbapi_connection.cursor()
     try:
-        # Enable foreign key constraints (disabled by default in SQLite)
-        cursor.execute("PRAGMA foreign_keys=ON")
+        # Apply SQLite pragma settings for better performance
+        pragmas = {
+            "journal_mode": "WAL",
+            "cache_size": -64000,  # 64MB cache
+            "synchronous": "NORMAL",
+            "temp_store": "MEMORY",
+            "mmap_size": 268435456,  # 256MB memory-mapped I/O
+            "foreign_keys": 1
+        }
         
-        # Use WAL mode for better concurrency
-        cursor.execute("PRAGMA journal_mode=WAL")
-        
-        # Optimize for faster writes at the cost of some durability
-        cursor.execute("PRAGMA synchronous=NORMAL")
-        
-        # Increase cache size for better performance (negative value = KB)
-        cursor.execute("PRAGMA cache_size=-64000")  # 64MB cache
-        
-        # Optimize for faster queries
-        cursor.execute("PRAGMA temp_store=MEMORY")
-        
-        # Enable query planner optimizations
+        # Apply each pragma setting
+        for pragma, value in pragmas.items():
+            if isinstance(value, str):
+                cursor.execute(f"PRAGMA {pragma}='{value}'")
+            else:
+                cursor.execute(f"PRAGMA {pragma}={value}")
+                
+        # Additional optimizations
         cursor.execute("PRAGMA optimize")
+        
+        # Log applied pragmas for debugging
+        logger.debug(f"Applied SQLite pragmas: {pragmas}")
+        
+    except Exception as e:
+        logger.error(f"Failed to configure SQLite pragmas: {e}")
+        # Continue without failing - database will still work with defaults
     finally:
         cursor.close()
 
@@ -270,7 +282,7 @@ def check_database_connection() -> bool:
     try:
         with get_db_session() as session:
             # Execute a simple query
-            session.execute("SELECT 1")
+            session.execute(text("SELECT 1"))
         return True
     except Exception as e:
         logger.error(f"Database connection check failed: {e}")
@@ -279,13 +291,14 @@ def check_database_connection() -> bool:
 
 def get_database_info() -> dict:
     """
-    Get information about the current database.
+    Get comprehensive information about the current database and connection pool.
     
     Returns:
-        Dictionary with database information
+        Dictionary with database information including performance metrics
     """
     try:
         db_engine = get_engine()
+        settings = get_database_settings()
         
         with get_db_session() as session:
             # Get database version and info
@@ -293,21 +306,64 @@ def get_database_info() -> dict:
                 result = session.execute("SELECT sqlite_version()").scalar()
                 db_version = result
                 db_type = "SQLite"
+                
+                # Get SQLite-specific information
+                sqlite_info = {}
+                try:
+                    # Get current pragma values
+                    pragmas_to_check = ['journal_mode', 'synchronous', 'cache_size', 
+                                       'temp_store', 'foreign_keys', 'page_size']
+                    for pragma in pragmas_to_check:
+                        try:
+                            value = session.execute(f"PRAGMA {pragma}").scalar()
+                            sqlite_info[f'pragma_{pragma}'] = value
+                        except:
+                            sqlite_info[f'pragma_{pragma}'] = 'N/A'
+                    
+                    # Get database file size and page count
+                    page_count = session.execute("PRAGMA page_count").scalar()
+                    page_size = session.execute("PRAGMA page_size").scalar()
+                    sqlite_info['total_pages'] = page_count
+                    sqlite_info['database_size_bytes'] = page_count * page_size if page_count and page_size else 'N/A'
+                    sqlite_info['database_size_mb'] = round((page_count * page_size) / (1024 * 1024), 2) if page_count and page_size else 'N/A'
+                    
+                except Exception as e:
+                    logger.warning(f"Could not get SQLite detailed info: {e}")
+                    sqlite_info['error'] = str(e)
             else:
                 db_version = "Unknown"
                 db_type = db_engine.url.drivername
+                sqlite_info = {}
             
             # Get table information
             from .models import get_all_models
             tables = [model.__tablename__ for model in get_all_models()]
             
+            # Get pool information
+            pool_info = {
+                'pool_class': db_engine.pool.__class__.__name__,
+                'pool_size': getattr(db_engine.pool, 'size', 'N/A'),
+                'checked_out_connections': getattr(db_engine.pool, 'checkedout', 'N/A'),
+                'overflow_connections': getattr(db_engine.pool, 'overflow', 'N/A'),
+                'checked_in_connections': getattr(db_engine.pool, 'checkedin', 'N/A'),
+            }
+            
+            # Add configuration info
+            config_info = {
+                'pool_timeout': settings.pool_timeout,
+                'pool_recycle': settings.pool_recycle,
+                'pool_pre_ping': settings.pool_pre_ping,
+                'max_overflow': settings.max_overflow,
+            }
+            
             return {
                 "database_type": db_type,
                 "database_version": db_version,
-                "database_url": str(db_engine.url),
+                "database_url": str(db_engine.url).replace(db_engine.url.password or '', '***') if db_engine.url.password else str(db_engine.url),
                 "tables": tables,
-                "connection_pool_size": getattr(db_engine.pool, 'size', 'N/A'),
-                "connection_pool_checked_out": getattr(db_engine.pool, 'checkedout', 'N/A'),
+                "pool_info": pool_info,
+                "config_info": config_info,
+                "sqlite_info": sqlite_info,
             }
     
     except Exception as e:
@@ -408,7 +464,7 @@ def health_check() -> dict:
                 try:
                     # Use a unique email to avoid conflicts with actual data
                     import uuid
-                    test_email = f"health_check_{uuid.uuid4().hex[:8]}@test.local"
+                    test_email = f"health_check_{uuid.uuid4().hex[:8]}@example.com"
                     
                     person = Person(
                         first_name="HealthCheck",

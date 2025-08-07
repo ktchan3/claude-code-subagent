@@ -74,7 +74,7 @@ async def create_employment(
             raise ActiveEmploymentExistsError(person.full_name)
         
         # Create new employment
-        db_employment = Employment(**employment_data.dict())
+        db_employment = Employment(**employment_data.model_dump())
         db.add(db_employment)
         db.commit()
         db.refresh(db_employment)
@@ -352,7 +352,7 @@ async def update_employment(
                 raise PositionNotFoundError(str(employment_data.position_id))
         
         # Update employment fields
-        update_data = employment_data.dict(exclude_unset=True)
+        update_data = employment_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(employment, field, value)
         
@@ -802,7 +802,7 @@ async def bulk_create_employment(
                     continue
                 
                 # Create employment
-                db_employment = Employment(**emp_data.dict())
+                db_employment = Employment(**emp_data.model_dump())
                 db.add(db_employment)
                 db.flush()  # Get ID without committing
                 

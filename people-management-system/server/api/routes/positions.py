@@ -66,7 +66,7 @@ async def create_position(
             raise PositionExistsError(position_data.title, department.name)
         
         # Create new position
-        db_position = Position(**position_data.dict())
+        db_position = Position(**position_data.model_dump())
         db.add(db_position)
         db.commit()
         db.refresh(db_position)
@@ -244,7 +244,7 @@ async def get_position_with_employees(
         
         # Create response data
         position.department_name = position.department.name
-        pos_data = PositionResponse.from_orm(position).dict()
+        pos_data = PositionResponse.from_orm(position).model_dump()
         pos_data["employees"] = employees_data
         
         return PositionWithEmployees(**pos_data)
@@ -301,7 +301,7 @@ async def get_position_with_history(
         
         # Create response data
         position.department_name = position.department.name
-        pos_data = PositionResponse.from_orm(position).dict()
+        pos_data = PositionResponse.from_orm(position).model_dump()
         pos_data["current_employees"] = current_employees
         pos_data["past_employees"] = past_employees
         
@@ -418,7 +418,7 @@ async def update_position(
                 raise PositionExistsError(position_data.title, department.name if department else "Unknown")
         
         # Update position fields
-        update_data = position_data.dict(exclude_unset=True)
+        update_data = position_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(position, field, value)
         
@@ -692,7 +692,7 @@ async def bulk_create_positions(
                     continue
                 
                 # Create position
-                db_position = Position(**pos_data.dict())
+                db_position = Position(**pos_data.model_dump())
                 db.add(db_position)
                 db.flush()  # Get ID without committing
                 

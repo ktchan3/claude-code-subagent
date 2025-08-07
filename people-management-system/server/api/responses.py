@@ -126,7 +126,7 @@ def create_success_response(
     
     return JSONResponse(
         status_code=status_code,
-        content=response_data.dict()
+        content=response_data.model_dump()
     )
 
 
@@ -155,7 +155,7 @@ def create_error_response(
     
     return JSONResponse(
         status_code=status_code,
-        content=response_data.dict()
+        content=response_data.model_dump()
     )
 
 

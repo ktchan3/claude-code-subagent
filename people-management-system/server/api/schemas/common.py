@@ -50,7 +50,12 @@ class PaginatedResponse(BaseModel, Generic[T]):
     """Generic paginated response."""
     
     items: List[T] = Field(..., description="List of items")
-    meta: PaginationMeta = Field(..., description="Pagination metadata")
+    page: int = Field(..., description="Current page number")
+    size: int = Field(..., description="Items per page") 
+    total: int = Field(..., description="Total number of items")
+    pages: int = Field(..., description="Total number of pages")
+    has_next: bool = Field(..., description="Whether there are more pages")
+    has_prev: bool = Field(..., description="Whether there are previous pages")
 
 
 class SuccessResponse(BaseModel):
@@ -174,7 +179,8 @@ def create_paginated_response(
     """Create a paginated response."""
     pages = (total + size - 1) // size  # Ceiling division
     
-    meta = PaginationMeta(
+    return PaginatedResponse(
+        items=items,
         page=page,
         size=size,
         total=total,
@@ -182,8 +188,6 @@ def create_paginated_response(
         has_next=page < pages,
         has_prev=page > 1
     )
-    
-    return PaginatedResponse(items=items, meta=meta)
 
 
 # Common field validators and examples

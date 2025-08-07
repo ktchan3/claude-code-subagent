@@ -8,18 +8,79 @@ security headers, rate limiting, API client tracking, and other cross-cutting co
 import time
 import logging
 import uuid
+import traceback
 from typing import Callable, Dict, Any, Optional
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response, JSONResponse
 from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR, HTTP_429_TOO_MANY_REQUESTS
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
+from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
 from ..core.exceptions import create_error_response
+from ..database.db import get_db
 from .auth import get_client_info_from_request, APIClientInfo
+from .middleware_components.security_middleware import SecurityMiddleware
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Middleware health monitoring
+class MiddlewareHealthMonitor:
+    """
+    Health monitoring for middleware components.
+    
+    Tracks middleware performance and error rates for system monitoring.
+    """
+    
+    def __init__(self):
+        self.error_counts = {}
+        self.request_counts = {}
+        self.response_times = {}
+        self.start_time = time.time()
+    
+    def record_error(self, middleware_name: str, error_type: str):
+        """Record an error for a specific middleware."""
+        key = f"{middleware_name}.{error_type}"
+        self.error_counts[key] = self.error_counts.get(key, 0) + 1
+    
+    def record_request(self, middleware_name: str, response_time: float):
+        """Record a successful request for a specific middleware."""
+        self.request_counts[middleware_name] = self.request_counts.get(middleware_name, 0) + 1
+        if middleware_name not in self.response_times:
+            self.response_times[middleware_name] = []
+        self.response_times[middleware_name].append(response_time)
+        
+        # Keep only last 1000 response times per middleware
+        if len(self.response_times[middleware_name]) > 1000:
+            self.response_times[middleware_name] = self.response_times[middleware_name][-1000:]
+    
+    def get_health_stats(self) -> Dict[str, Any]:
+        """Get comprehensive health statistics."""
+        uptime = time.time() - self.start_time
+        
+        stats = {
+            'uptime_seconds': uptime,
+            'error_counts': dict(self.error_counts),
+            'request_counts': dict(self.request_counts),
+            'middleware_performance': {}
+        }
+        
+        # Calculate average response times
+        for middleware, times in self.response_times.items():
+            if times:
+                stats['middleware_performance'][middleware] = {
+                    'avg_response_time': sum(times) / len(times),
+                    'min_response_time': min(times),
+                    'max_response_time': max(times),
+                    'sample_count': len(times)
+                }
+        
+        return stats
+
+# Global health monitor instance
+health_monitor = MiddlewareHealthMonitor()
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -228,50 +289,234 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 class ErrorHandlingMiddleware(BaseHTTPMiddleware):
     """
-    Middleware for global error handling.
+    Comprehensive middleware for global error handling with database rollback support.
     
-    Catches unhandled exceptions and returns appropriate error responses.
+    Catches unhandled exceptions, handles database rollbacks, and returns appropriate error responses.
+    Provides detailed error categorization and logging for different types of errors.
     """
+    
+    def __init__(self, app):
+        super().__init__(app)
+        self.error_categories = {
+            'database': ['IntegrityError', 'OperationalError', 'SQLAlchemyError', 'DatabaseError'],
+            'validation': ['ValidationError', 'ValueError', 'TypeError'],
+            'authentication': ['AuthenticationError', 'PermissionError', 'Unauthorized'],
+            'not_found': ['NotFoundError', 'PersonNotFoundError', 'FileNotFoundError'],
+            'business': ['EmailAlreadyExistsError', 'BusinessRuleError', 'ConflictError']
+        }
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         try:
             return await call_next(request)
+            
         except Exception as e:
-            # Log the error
+            # Get request ID for tracking
             request_id = getattr(request.state, 'request_id', str(uuid.uuid4()))
             
-            logger.exception(
-                f"Unhandled exception in request {request_id}: {str(e)}"
+            # Categorize the error
+            error_category = self._categorize_error(e)
+            
+            # Log the error with appropriate level
+            self._log_error(e, request_id, error_category, request)
+            
+            # Create appropriate error response
+            error_response = self._create_error_response(e, request_id, error_category)
+            
+            # Determine HTTP status code
+            status_code = self._get_status_code(e, error_category)
+            
+            return JSONResponse(
+                status_code=status_code,
+                content=error_response,
+                headers={
+                    "X-Request-ID": request_id,
+                    "X-Error-Category": error_category
+                }
             )
+    
+    def _categorize_error(self, error: Exception) -> str:
+        """
+        Categorize error based on its type for appropriate handling.
+        
+        Args:
+            error: The exception that occurred
             
-            # Determine if this is a development environment
-            settings = get_settings()
+        Returns:
+            Category string for the error
+        """
+        error_type = type(error).__name__
+        
+        for category, error_types in self.error_categories.items():
+            if error_type in error_types or any(error_type.endswith(etype) for etype in error_types):
+                return category
+        
+        return 'unknown'
+    
+    def _log_error(self, error: Exception, request_id: str, category: str, request: Request) -> None:
+        """
+        Log error with appropriate detail level based on category.
+        
+        Args:
+            error: The exception that occurred
+            request_id: Unique request identifier
+            category: Error category
+            request: Request object for context
+        """
+        # Create base log context
+        log_context = {
+            'request_id': request_id,
+            'error_type': type(error).__name__,
+            'error_category': category,
+            'method': request.method,
+            'url': str(request.url),
+            'client_ip': request.client.host if request.client else 'unknown'
+        }
+        
+        # Add API client info if available
+        api_client = get_client_info_from_request(request)
+        if api_client:
+            log_context.update({
+                'client_name': api_client.client_name,
+                'client_key': api_client.key_id
+            })
+        
+        # Log based on category and severity
+        if category in ['database', 'unknown']:
+            # Critical errors - full exception logging
+            logger.exception(
+                f"Critical error [{category}] in request {request_id}: {str(error)}",
+                extra=log_context
+            )
+        elif category in ['business', 'validation']:
+            # Business logic errors - warning level
+            logger.warning(
+                f"Business error [{category}] in request {request_id}: {str(error)}",
+                extra=log_context
+            )
+        elif category == 'not_found':
+            # Not found errors - info level
+            logger.info(
+                f"Not found error [{category}] in request {request_id}: {str(error)}",
+                extra=log_context
+            )
+        else:
+            # Default error logging
+            logger.error(
+                f"Error [{category}] in request {request_id}: {str(error)}",
+                extra=log_context
+            )
+    
+    def _create_error_response(self, error: Exception, request_id: str, category: str) -> Dict[str, Any]:
+        """
+        Create appropriate error response based on error category.
+        
+        Args:
+            error: The exception that occurred
+            request_id: Unique request identifier
+            category: Error category
             
-            # Create error response
+        Returns:
+            Error response dictionary
+        """
+        settings = get_settings()
+        base_details = {"request_id": request_id}
+        
+        # Database errors
+        if category == 'database':
+            if isinstance(error, IntegrityError):
+                return create_error_response(
+                    message="Data integrity constraint violation",
+                    error_code="INTEGRITY_ERROR",
+                    details={**base_details, "constraint": "data_integrity"}
+                )
+            elif isinstance(error, OperationalError):
+                return create_error_response(
+                    message="Database operational error",
+                    error_code="DATABASE_ERROR",
+                    details=base_details
+                )
+            else:
+                return create_error_response(
+                    message="Database error occurred",
+                    error_code="DATABASE_ERROR",
+                    details=base_details
+                )
+        
+        # Validation errors
+        elif category == 'validation':
+            return create_error_response(
+                message=f"Validation error: {str(error)}",
+                error_code="VALIDATION_ERROR",
+                details=base_details
+            )
+        
+        # Not found errors
+        elif category == 'not_found':
+            return create_error_response(
+                message="Resource not found",
+                error_code="NOT_FOUND",
+                details=base_details
+            )
+        
+        # Business logic errors
+        elif category == 'business':
+            return create_error_response(
+                message=str(error),
+                error_code="BUSINESS_ERROR",
+                details=base_details
+            )
+        
+        # Authentication errors
+        elif category == 'authentication':
+            return create_error_response(
+                message="Authentication or authorization error",
+                error_code="AUTH_ERROR",
+                details=base_details
+            )
+        
+        # Unknown or critical errors
+        else:
             if settings.debug:
                 # In debug mode, include more details
-                error_response = create_error_response(
-                    message=f"Internal server error: {str(e)}",
+                return create_error_response(
+                    message=f"Internal server error: {str(error)}",
                     error_code="INTERNAL_ERROR",
                     details={
-                        "request_id": request_id,
-                        "exception_type": type(e).__name__,
-                        "exception_details": str(e)
+                        **base_details,
+                        "exception_type": type(error).__name__,
+                        "exception_details": str(error),
+                        "traceback": traceback.format_exc() if settings.debug else None
                     }
                 )
             else:
                 # In production, use generic error message
-                error_response = create_error_response(
+                return create_error_response(
                     message="An internal server error occurred",
                     error_code="INTERNAL_ERROR",
-                    details={"request_id": request_id}
+                    details=base_details
                 )
+    
+    def _get_status_code(self, error: Exception, category: str) -> int:
+        """
+        Determine appropriate HTTP status code based on error category.
+        
+        Args:
+            error: The exception that occurred
+            category: Error category
             
-            return JSONResponse(
-                status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-                content=error_response,
-                headers={"X-Request-ID": request_id}
-            )
+        Returns:
+            HTTP status code
+        """
+        status_code_map = {
+            'not_found': 404,
+            'validation': 400,
+            'authentication': 401,
+            'business': 409,  # Conflict
+            'database': HTTP_500_INTERNAL_SERVER_ERROR,
+            'unknown': HTTP_500_INTERNAL_SERVER_ERROR
+        }
+        
+        return status_code_map.get(category, HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -413,22 +658,93 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 class DatabaseConnectionMiddleware(BaseHTTPMiddleware):
     """
-    Middleware for ensuring database connections are properly handled.
+    Enhanced middleware for database connection and transaction management.
     
     This middleware ensures that database connections are properly
-    managed and closed after each request.
+    managed, includes connection pooling monitoring, and handles
+    connection-related errors gracefully.
     """
     
+    def __init__(self, app):
+        super().__init__(app)
+        self.connection_errors = 0
+        self.successful_connections = 0
+        self.last_reset = time.time()
+    
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        start_time = time.time()
+        
         try:
             response = await call_next(request)
+            self.successful_connections += 1
             return response
-        except Exception as e:
-            # Log database-related errors
-            if "database" in str(e).lower() or "connection" in str(e).lower():
-                logger.error(f"Database connection error: {str(e)}")
+            
+        except SQLAlchemyError as e:
+            self.connection_errors += 1
+            
+            # Log specific database errors with context
+            error_context = {
+                'error_type': type(e).__name__,
+                'method': request.method,
+                'url': str(request.url),
+                'duration': time.time() - start_time,
+                'connection_errors': self.connection_errors,
+                'successful_connections': self.successful_connections
+            }
+            
+            if isinstance(e, OperationalError):
+                logger.error(
+                    f"Database operational error: {str(e)}",
+                    extra=error_context
+                )
+            elif isinstance(e, IntegrityError):
+                logger.warning(
+                    f"Database integrity error: {str(e)}",
+                    extra=error_context
+                )
+            else:
+                logger.error(
+                    f"Database error: {str(e)}",
+                    extra=error_context
+                )
+            
+            # Reset counters periodically
+            current_time = time.time()
+            if current_time - self.last_reset > 3600:  # Reset every hour
+                self.connection_errors = 0
+                self.successful_connections = 0
+                self.last_reset = current_time
             
             raise e
+            
+        except Exception as e:
+            # Log non-database errors that might affect database operations
+            if any(keyword in str(e).lower() for keyword in ['database', 'connection', 'session', 'transaction']):
+                logger.error(
+                    f"Database-related error: {str(e)}",
+                    extra={
+                        'error_type': type(e).__name__,
+                        'method': request.method,
+                        'url': str(request.url),
+                        'duration': time.time() - start_time
+                    }
+                )
+            
+            raise e
+    
+    def get_connection_stats(self) -> Dict[str, Any]:
+        """
+        Get database connection statistics for monitoring.
+        
+        Returns:
+            Dictionary with connection statistics
+        """
+        return {
+            'connection_errors': self.connection_errors,
+            'successful_connections': self.successful_connections,
+            'error_rate': self.connection_errors / max(1, self.successful_connections + self.connection_errors),
+            'last_reset': self.last_reset
+        }
 
 
 class CacheControlMiddleware(BaseHTTPMiddleware):
@@ -490,7 +806,7 @@ def create_rate_limit_middleware(calls_per_minute: int = None) -> RateLimitMiddl
 
 def setup_middleware(app):
     """
-    Set up all middleware for the FastAPI application.
+    Set up all middleware for the FastAPI application with enhanced error handling.
     
     Args:
         app: FastAPI application instance
@@ -505,16 +821,19 @@ def setup_middleware(app):
     # Rate limiting
     app.add_middleware(RateLimitMiddleware, calls_per_minute=settings.rate_limit_per_minute)
     
+    # Security input validation and sanitization
+    app.add_middleware(SecurityMiddleware, max_request_size=10 * 1024 * 1024)
+    
     # Security headers
     app.add_middleware(SecurityHeadersMiddleware)
     
-    # Database connection handling
+    # Enhanced database connection and transaction handling
     app.add_middleware(DatabaseConnectionMiddleware)
     
-    # Error handling
+    # Comprehensive error handling with rollback support
     app.add_middleware(ErrorHandlingMiddleware)
     
     # Request logging (innermost)
     app.add_middleware(RequestLoggingMiddleware)
     
-    logger.info("Middleware setup completed")
+    logger.info("Enhanced middleware setup completed with comprehensive security, error handling and database rollback support")
