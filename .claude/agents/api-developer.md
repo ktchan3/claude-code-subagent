@@ -1,7 +1,7 @@
 ---
 name: api-developer
 description: Design and build developer-friendly APIs with proper documentation, versioning, and security. Specializes in REST, GraphQL, and API gateway patterns. Use PROACTIVELY for API-first development and integration projects.
-model: sonnet
+model: opus
 color: purple
 ---
 
