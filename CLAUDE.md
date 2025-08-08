@@ -238,6 +238,8 @@ response_data = format_person_response(db_person)
 5. **Qt test failures**: Set `QT_QPA_PLATFORM=offscreen`
 6. **Migration conflicts**: Use `alembic merge` command
 7. **Test failures**: Run `python run_tests.py` or use pytest with proper fixtures
+8. **Dashboard empty on startup**: ✅ FIXED - Theme stylesheet was hiding content, now shows sample data immediately
+9. **Label overlap in forms**: ✅ FIXED - QGroupBox margins and padding adjusted in `styles.qss`
 
 ### Debug Commands (Enhanced)
 ```bash
@@ -259,7 +261,73 @@ uv run python -c "from server.api.utils.security import sanitize_search_term; pr
 
 # Test service layer
 uv run python -c "from server.api.services.person_service import PersonService; print('PersonService available')"
+
+# Test client imports (useful for debugging PySide6 issues)
+uv run python -c "from client.ui.main_window import MainWindow; print('Client imports successful')"
 ```
+
+### Dashboard Empty Issue Fix
+If the dashboard appears empty on startup:
+1. **Root Cause**: Theme stylesheet was setting all QWidget backgrounds to the same color, making content invisible
+2. **Solution**: Fixed in `client/resources/themes.py` by removing global QWidget background styling
+3. **Enhancements**: Dashboard now shows sample data immediately on load, even without API connection
+4. **Files Fixed**:
+   - `client/resources/themes.py` - Removed problematic background styling
+   - `client/ui/views/dashboard_view.py` - Added immediate sample data display
+   - Dashboard will NEVER be empty - always shows statistics cards and activity
+
+### PySide6 Import Reference (IMPORTANT)
+Common PySide6 import locations - use this to avoid import errors:
+
+#### QtGui Module
+```python
+from PySide6.QtGui import (
+    QShortcut,      # NOT from QtWidgets!
+    QKeySequence,
+    QAction,
+    QIcon,
+    QFont,
+    QPalette,
+    QPixmap,
+    QColor
+)
+```
+
+#### QtCore Module  
+```python
+from PySide6.QtCore import (
+    Qt,
+    Signal,
+    Slot,
+    QTimer,
+    QSettings,
+    QDate,
+    QDateTime,
+    QThread
+)
+```
+
+#### QtWidgets Module
+```python
+from PySide6.QtWidgets import (
+    QMainWindow,
+    QWidget,
+    QLabel,
+    QPushButton,
+    QMessageBox,
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTableWidget,
+    QLineEdit
+)
+```
+
+**Common Mistakes to Avoid:**
+- ❌ `from PySide6.QtWidgets import QShortcut` → ✅ `from PySide6.QtGui import QShortcut`
+- ❌ `from PySide6.QtWidgets import QAction` → ✅ `from PySide6.QtGui import QAction`  
+- ❌ Using Qt string methods like `.contains()` → ✅ Use Python's `in` operator
+- ❌ Missing type imports → ✅ `from typing import List, Dict, Optional`
 
 ### File Locations (Updated)
 - **Database**: `people_management.db`

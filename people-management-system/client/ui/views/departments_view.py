@@ -50,6 +50,8 @@ class DepartmentForm(QWidget):
         # Department details group
         details_group = QGroupBox("Department Details")
         details_layout = QFormLayout(details_group)
+        details_layout.setVerticalSpacing(10)
+        details_layout.setContentsMargins(5, 10, 5, 5)
         
         # Name (required)
         self.name_edit = QLineEdit()
@@ -73,6 +75,8 @@ class DepartmentForm(QWidget):
         # Status and metadata
         meta_group = QGroupBox("Status & Information")
         meta_layout = QFormLayout(meta_group)
+        meta_layout.setVerticalSpacing(10)
+        meta_layout.setContentsMargins(5, 10, 5, 5)
         
         # Status
         self.status_combo = QComboBox()

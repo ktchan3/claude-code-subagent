@@ -121,6 +121,8 @@ class SearchWidget(QWidget):
         """Create quick search section."""
         quick_group = QGroupBox("Quick Search")
         quick_layout = QHBoxLayout(quick_group)
+        quick_layout.setContentsMargins(10, 15, 10, 10)  # Add proper margins
+        quick_layout.setSpacing(8)  # Add spacing between elements
         
         # Search input
         self.quick_search_input = QLineEdit()
@@ -146,6 +148,8 @@ class SearchWidget(QWidget):
         """Create advanced filters section."""
         filters_group = QGroupBox("Advanced Filters")
         filters_layout = QVBoxLayout(filters_group)
+        filters_layout.setContentsMargins(10, 15, 10, 10)  # Add proper margins
+        filters_layout.setSpacing(10)  # Add spacing between elements
         
         # Filter list container
         scroll_area = QScrollArea()

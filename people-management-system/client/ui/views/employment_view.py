@@ -51,6 +51,8 @@ class EmploymentDialog(QDialog):
         # Basic information
         basic_group = QGroupBox("Basic Information")
         basic_layout = QFormLayout(basic_group)
+        basic_layout.setVerticalSpacing(10)
+        basic_layout.setContentsMargins(5, 10, 5, 5)
         
         # Person selection
         self.person_combo = QComboBox()
@@ -67,6 +69,8 @@ class EmploymentDialog(QDialog):
         # Employment details
         details_group = QGroupBox("Employment Details")
         details_layout = QFormLayout(details_group)
+        details_layout.setVerticalSpacing(10)
+        details_layout.setContentsMargins(5, 10, 5, 5)
         
         # Start date
         self.start_date_edit = QDateEdit()
@@ -106,6 +110,8 @@ class EmploymentDialog(QDialog):
         # Additional information
         additional_group = QGroupBox("Additional Information")
         additional_layout = QFormLayout(additional_group)
+        additional_layout.setVerticalSpacing(10)
+        additional_layout.setContentsMargins(5, 10, 5, 5)
         
         # Notes
         self.notes_edit = QTextEdit()

@@ -130,7 +130,8 @@ class PersonForm(QWidget):
         # Main form widget
         form_widget = QWidget()
         form_layout = QVBoxLayout(form_widget)
-        form_layout.setSpacing(15)
+        form_layout.setSpacing(20)  # Increased spacing between sections from 15 to 20
+        form_layout.setContentsMargins(5, 5, 5, 5)  # Add margins to form widget
         
         # Create form sections
         self.create_basic_info_section(form_layout)
@@ -155,6 +156,8 @@ class PersonForm(QWidget):
         basic_group = QGroupBox("Basic Information")
         basic_layout = QFormLayout(basic_group)
         basic_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        basic_layout.setVerticalSpacing(10)  # Add vertical spacing between form fields
+        basic_layout.setContentsMargins(5, 10, 5, 5)  # Add top margin for content
         
         # First name (required)
         self.first_name_edit = QLineEdit()
@@ -189,6 +192,8 @@ class PersonForm(QWidget):
         contact_group = QGroupBox("Contact Information")
         contact_layout = QFormLayout(contact_group)
         contact_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        contact_layout.setVerticalSpacing(10)  # Add vertical spacing between form fields
+        contact_layout.setContentsMargins(5, 10, 5, 5)  # Add top margin for content
         
         # Email (required)
         self.email_edit = QLineEdit()
@@ -241,6 +246,8 @@ class PersonForm(QWidget):
         personal_group = QGroupBox("Personal Information")
         personal_layout = QFormLayout(personal_group)
         personal_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        personal_layout.setVerticalSpacing(10)  # Add vertical spacing between form fields
+        personal_layout.setContentsMargins(5, 10, 5, 5)  # Add top margin for content
         
         # Date of birth
         self.dob_edit = QDateEdit()
@@ -288,6 +295,8 @@ class PersonForm(QWidget):
         additional_group = QGroupBox("Additional Information")
         additional_layout = QFormLayout(additional_group)
         additional_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        additional_layout.setVerticalSpacing(10)  # Add vertical spacing between form fields
+        additional_layout.setContentsMargins(5, 10, 5, 5)  # Add top margin for content
         
         # Notes
         self.notes_edit = QTextEdit()

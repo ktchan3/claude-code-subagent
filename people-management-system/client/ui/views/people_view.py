@@ -662,20 +662,57 @@ class PeopleView(QWidget):
         count = len(selected_items)
         person_text = "person" if count == 1 else "people"
         
-        reply = QMessageBox.question(
-            self,
-            f"Delete {person_text.title()}",
-            f"Are you sure you want to delete {count} {person_text}?\n\n"
-            "This action cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+        # Build detailed message with names
+        if count == 1:
+            person = selected_items[0]
+            name = f"{person.get('first_name', '')} {person.get('last_name', '')}".strip()
+            detail_msg = f"Are you sure you want to delete {name}?"
+        else:
+            detail_msg = f"Are you sure you want to delete {count} {person_text}?"
+            if count <= 5:  # Show names if not too many
+                names = [f"• {p.get('first_name', '')} {p.get('last_name', '')}".strip() 
+                        for p in selected_items[:5]]
+                detail_msg += "\n\n" + "\n".join(names)
+        
+        detail_msg += "\n\n⚠️ This action cannot be undone!"
+        
+        # Create custom message box with icon
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Warning)
+        msg_box.setWindowTitle(f"Confirm Delete {person_text.title()}")
+        msg_box.setText(detail_msg)
+        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg_box.setDefaultButton(QMessageBox.No)
+        
+        # Style the Yes button to be red/dangerous
+        yes_button = msg_box.button(QMessageBox.Yes)
+        yes_button.setText(f"Delete {count} {person_text}")
+        yes_button.setStyleSheet("QPushButton { color: red; }")
+        
+        reply = msg_box.exec()
         
         if reply == QMessageBox.Yes:
-            for person in selected_items:
+            # Show progress if deleting many items
+            if count > 5:
+                from client.ui.widgets.loading_widget import show_loading_dialog
+                loading = show_loading_dialog(
+                    f"Deleting {count} {person_text}...",
+                    "Delete Progress",
+                    can_cancel=False,
+                    parent=self
+                )
+                loading.set_progress(0, count)
+            
+            for i, person in enumerate(selected_items):
                 person_id = person.get('id')
                 if person_id:
                     self.api_service.delete_person_async(person_id)
+                    
+                    if count > 5:
+                        loading.set_progress(i + 1, count)
+            
+            if count > 5:
+                loading.close()
     
     def import_people(self):
         """Import people from file."""

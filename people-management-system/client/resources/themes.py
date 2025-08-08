@@ -4,7 +4,7 @@ Theme management for People Management System Client
 Provides light and dark theme support for the application.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QPalette, QColor
@@ -142,10 +142,12 @@ class ThemeManager(QObject):
             background-color: #f5f5f5;
         }
         
+        /* Remove global QWidget styling that was hiding dashboard content
         QWidget {
             background-color: #f5f5f5;
             color: #212121;
         }
+        */
         
         QPushButton {
             background-color: #1976d2;
@@ -185,10 +187,12 @@ class ThemeManager(QObject):
             background-color: #121212;
         }
         
+        /* Remove global QWidget styling that was hiding dashboard content
         QWidget {
             background-color: #121212;
             color: #ffffff;
         }
+        */
         
         QPushButton {
             background-color: #90caf9;

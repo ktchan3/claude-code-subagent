@@ -51,6 +51,8 @@ class PositionDialog(QDialog):
         # Position details
         details_group = QGroupBox("Position Details")
         details_layout = QFormLayout(details_group)
+        details_layout.setVerticalSpacing(10)
+        details_layout.setContentsMargins(5, 10, 5, 5)
         
         # Title (required)
         self.title_edit = QLineEdit()
@@ -79,6 +81,8 @@ class PositionDialog(QDialog):
         # Salary information
         salary_group = QGroupBox("Salary Information")
         salary_layout = QFormLayout(salary_group)
+        salary_layout.setVerticalSpacing(10)
+        salary_layout.setContentsMargins(5, 10, 5, 5)
         
         # Salary range
         salary_range_layout = QHBoxLayout()
@@ -104,6 +108,8 @@ class PositionDialog(QDialog):
         # Status
         status_group = QGroupBox("Status")
         status_layout = QFormLayout(status_group)
+        status_layout.setVerticalSpacing(10)
+        status_layout.setContentsMargins(5, 10, 5, 5)
         
         self.status_combo = QComboBox()
         self.status_combo.addItems(["Active", "Inactive", "Draft", "Filled"])

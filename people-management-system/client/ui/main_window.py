@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QProgressBar, QApplication, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QSize, QTimer, QSettings
-from PySide6.QtGui import QIcon, QFont, QAction, QPalette, QPixmap
+from PySide6.QtGui import QIcon, QFont, QAction, QPalette, QPixmap, QKeySequence, QShortcut
 
 from client.services.api_service import APIService
 from client.services.config_service import ConfigService
@@ -24,6 +24,10 @@ from client.ui.views.people_view import PeopleView
 from client.ui.views.departments_view import DepartmentsView
 from client.ui.views.positions_view import PositionsView
 from client.ui.views.employment_view import EmploymentView
+from client.ui.dialogs.settings_dialog import SettingsDialog
+from client.ui.widgets.error_dialog import show_error, show_network_error
+from client.utils.icon_manager import get_icon_manager, get_icon, get_emoji
+from client.resources.themes import theme_manager
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +60,16 @@ class MainWindow(QMainWindow):
         self.current_view_name = "dashboard"
         self.views: Dict[str, QWidget] = {}
         
-        # Navigation items
+        # Icon manager
+        self.icon_manager = get_icon_manager()
+        
+        # Navigation items with proper icons
         self.navigation_items = [
-            NavigationItem("Dashboard", "📊", DashboardView, "System overview and statistics"),
-            NavigationItem("People", "👥", PeopleView, "Manage people and personal information"),
-            NavigationItem("Departments", "🏢", DepartmentsView, "Manage departments and organizational structure"),
-            NavigationItem("Positions", "💼", PositionsView, "Manage job positions and requirements"),
-            NavigationItem("Employment", "📝", EmploymentView, "Manage employment records and assignments"),
+            NavigationItem("Dashboard", get_emoji('dashboard'), DashboardView, "System overview and statistics (Alt+1)"),
+            NavigationItem("People", get_emoji('people'), PeopleView, "Manage people and personal information (Alt+2)"),
+            NavigationItem("Departments", get_emoji('departments'), DepartmentsView, "Manage departments and organizational structure (Alt+3)"),
+            NavigationItem("Positions", get_emoji('positions'), PositionsView, "Manage job positions and requirements (Alt+4)"),
+            NavigationItem("Employment", get_emoji('employment'), EmploymentView, "Manage employment records and assignments (Alt+5)"),
         ]
         
         self.setWindowTitle("People Management System")
@@ -73,6 +80,7 @@ class MainWindow(QMainWindow):
         self.setup_status_bar()
         self.setup_menu_bar()
         self.setup_toolbar()
+        self.setup_keyboard_shortcuts()
         
         self.load_window_settings()
         self.show_dashboard()
@@ -230,8 +238,9 @@ class MainWindow(QMainWindow):
         # Spacer
         header_layout.addStretch()
         
-        # Refresh button
-        self.refresh_btn = QPushButton("Refresh")
+        # Refresh button with icon and tooltip
+        self.refresh_btn = QPushButton(f"{get_emoji('refresh')} Refresh")
+        self.refresh_btn.setToolTip("Refresh current view (F5)")
         self.refresh_btn.clicked.connect(self.refresh_current_view)
         header_layout.addWidget(self.refresh_btn)
         
@@ -260,9 +269,9 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.status_bar.addPermanentWidget(self.progress_bar)
         
-        # Connection indicator
-        self.connection_indicator = QLabel("●")
-        self.connection_indicator.setStyleSheet("color: green; font-size: 12pt; font-weight: bold;")
+        # Connection indicator with proper icon
+        self.connection_indicator = QLabel(get_emoji('connected'))
+        self.connection_indicator.setStyleSheet("font-size: 12pt; font-weight: bold;")
         self.connection_indicator.setToolTip("Connected to server")
         self.status_bar.addPermanentWidget(self.connection_indicator)
         
@@ -276,23 +285,32 @@ class MainWindow(QMainWindow):
         # File menu
         file_menu = menubar.addMenu("File")
         
-        export_action = QAction("Export Data...", self)
-        export_action.setShortcut("Ctrl+E")
+        export_action = QAction(f"{get_emoji('export')} Export Data...", self)
+        export_action.setShortcut("Ctrl+Shift+E")
+        export_action.setToolTip("Export data to file")
         export_action.triggered.connect(self.export_data)
         file_menu.addAction(export_action)
         
+        import_action = QAction(f"{get_emoji('import')} Import Data...", self)
+        import_action.setShortcut("Ctrl+Shift+I")
+        import_action.setToolTip("Import data from file")
+        import_action.triggered.connect(self.import_data)
+        file_menu.addAction(import_action)
+        
         file_menu.addSeparator()
         
-        exit_action = QAction("Exit", self)
+        exit_action = QAction(f"{get_emoji('logout')} Exit", self)
         exit_action.setShortcut("Ctrl+Q")
+        exit_action.setToolTip("Exit the application")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
         # View menu
         view_menu = menubar.addMenu("View")
         
-        refresh_action = QAction("Refresh", self)
+        refresh_action = QAction(f"{get_emoji('refresh')} Refresh", self)
         refresh_action.setShortcut("F5")
+        refresh_action.setToolTip("Refresh current view")
         refresh_action.triggered.connect(self.refresh_current_view)
         view_menu.addAction(refresh_action)
         
@@ -301,18 +319,26 @@ class MainWindow(QMainWindow):
         # Theme submenu
         theme_menu = view_menu.addMenu("Theme")
         
-        light_theme_action = QAction("Light", self)
+        light_theme_action = QAction("☀️ Light", self)
+        light_theme_action.setCheckable(True)
         light_theme_action.triggered.connect(lambda: self.set_theme("light"))
         theme_menu.addAction(light_theme_action)
         
-        dark_theme_action = QAction("Dark", self)
+        dark_theme_action = QAction("🌙 Dark", self)
+        dark_theme_action.setCheckable(True)
         dark_theme_action.triggered.connect(lambda: self.set_theme("dark"))
         theme_menu.addAction(dark_theme_action)
+        
+        # Theme action group for radio button behavior
+        self.theme_actions = [light_theme_action, dark_theme_action]
+        light_theme_action.setChecked(True)  # Default to light theme
         
         # Tools menu
         tools_menu = menubar.addMenu("Tools")
         
-        settings_action = QAction("Settings...", self)
+        settings_action = QAction(f"{get_emoji('settings')} Settings...", self)
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.setToolTip("Open application settings")
         settings_action.triggered.connect(self.show_settings)
         tools_menu.addAction(settings_action)
         
@@ -323,7 +349,16 @@ class MainWindow(QMainWindow):
         # Help menu
         help_menu = menubar.addMenu("Help")
         
-        about_action = QAction("About", self)
+        user_guide_action = QAction(f"{get_emoji('help')} User Guide", self)
+        user_guide_action.setShortcut("F1")
+        user_guide_action.setToolTip("Open user guide")
+        user_guide_action.triggered.connect(self.show_user_guide)
+        help_menu.addAction(user_guide_action)
+        
+        help_menu.addSeparator()
+        
+        about_action = QAction(f"{get_emoji('info')} About", self)
+        about_action.setToolTip("About this application")
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
     
@@ -332,11 +367,23 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar()
         self.addToolBar(toolbar)
         
-        # Quick actions
-        refresh_action = QAction("🔄", self)
-        refresh_action.setToolTip("Refresh current view")
+        # Quick actions with proper icons
+        refresh_action = QAction(get_emoji('refresh'), self)
+        refresh_action.setToolTip("Refresh current view (F5)")
         refresh_action.triggered.connect(self.refresh_current_view)
         toolbar.addAction(refresh_action)
+        
+        # Add person action
+        add_person_action = QAction(get_emoji('add'), self)
+        add_person_action.setToolTip("Add new person (Ctrl+N)")
+        add_person_action.triggered.connect(self.quick_add_person)
+        toolbar.addAction(add_person_action)
+        
+        # Search action
+        search_action = QAction(get_emoji('search'), self)
+        search_action.setToolTip("Search (Ctrl+F)")
+        search_action.triggered.connect(self.focus_search)
+        toolbar.addAction(search_action)
         
         toolbar.addSeparator()
         
@@ -367,7 +414,10 @@ class MainWindow(QMainWindow):
     
     def show_view(self, view_name: str):
         """Show the specified view."""
-        if view_name == self.current_view_name:
+        logger.info(f"show_view called with: {view_name}")
+        
+        if view_name == self.current_view_name and view_name in self.views:
+            logger.info(f"View {view_name} already current")
             return
         
         try:
@@ -384,11 +434,15 @@ class MainWindow(QMainWindow):
             
             # Create view if it doesn't exist
             if view_name not in self.views:
+                logger.info(f"Creating new view: {view_name}")
                 self.create_view(view_name, nav_item)
+            else:
+                logger.info(f"Using existing view: {view_name}")
             
             # Switch to view
             view = self.views[view_name]
             self.content_stack.setCurrentWidget(view)
+            logger.info(f"Set current widget to: {view_name}")
             
             # Update UI
             self.current_view_name = view_name
@@ -417,13 +471,17 @@ class MainWindow(QMainWindow):
     def create_view(self, view_name: str, nav_item: NavigationItem):
         """Create a view instance."""
         try:
+            logger.info(f"Creating view instance for: {view_name}")
             view_class = nav_item.view_class
             view = view_class(self.api_service, self.config_service, self)
             
             self.views[view_name] = view
             self.content_stack.addWidget(view)
             
-            logger.info(f"Created view: {view_name}")
+            # Force view to be visible
+            view.show()
+            
+            logger.info(f"Successfully created and added view: {view_name}")
             
         except Exception as e:
             logger.error(f"Error creating view {view_name}: {e}")
@@ -437,6 +495,7 @@ class MainWindow(QMainWindow):
     
     def show_dashboard(self):
         """Show the dashboard view."""
+        logger.info("show_dashboard() called - switching to dashboard view")
         self.show_view("dashboard")
     
     def refresh_current_view(self):
@@ -453,12 +512,12 @@ class MainWindow(QMainWindow):
     def update_connection_status(self, connected: bool):
         """Update connection status display."""
         if connected:
-            self.connection_status_label.setText("✓ Connected")
+            self.connection_status_label.setText(f"{get_emoji('success')} Connected")
             self.connection_status_label.setStyleSheet("color: green; font-weight: bold;")
             
             # Only update connection_indicator if it exists (status bar has been set up)
             if hasattr(self, 'connection_indicator'):
-                self.connection_indicator.setStyleSheet("color: green; font-size: 12pt; font-weight: bold;")
+                self.connection_indicator.setText(get_emoji('connected'))
                 self.connection_indicator.setToolTip("Connected to server")
             
             # Update server info
@@ -466,12 +525,12 @@ class MainWindow(QMainWindow):
             self.server_info_label.setText(f"Server: {base_url}")
             
         else:
-            self.connection_status_label.setText("✗ Disconnected")
+            self.connection_status_label.setText(f"{get_emoji('error')} Disconnected")
             self.connection_status_label.setStyleSheet("color: red; font-weight: bold;")
             
             # Only update connection_indicator if it exists (status bar has been set up)
             if hasattr(self, 'connection_indicator'):
-                self.connection_indicator.setStyleSheet("color: red; font-size: 12pt; font-weight: bold;")
+                self.connection_indicator.setText(get_emoji('disconnected'))
                 self.connection_indicator.setToolTip("Disconnected from server")
             
             self.server_info_label.setText("No connection")
@@ -481,6 +540,14 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'status_label'):
             self.status_label.setText(f"Connection error: {error_message}")
         logger.error(f"Connection error: {error_message}")
+        
+        # Show network error dialog with retry option
+        show_network_error(
+            message="Failed to connect to the server",
+            details=error_message,
+            retry_action=lambda: self.api_service.test_connection_async(),
+            parent=self
+        )
     
     def show_operation_status(self, operation: str):
         """Show operation status."""
@@ -506,18 +573,40 @@ class MainWindow(QMainWindow):
     
     def export_data(self):
         """Export data functionality."""
-        # TODO: Implement data export
-        QMessageBox.information(self, "Export Data", "Data export functionality will be implemented soon.")
+        if self.current_view_name in self.views:
+            view = self.views[self.current_view_name]
+            if hasattr(view, 'export_data'):
+                view.export_data()
+            else:
+                QMessageBox.information(
+                    self,
+                    "Export Not Available",
+                    f"Export is not available for the {self.current_view_name} view."
+                )
+        else:
+            QMessageBox.warning(self, "No View", "Please select a view to export data from.")
     
     def set_theme(self, theme: str):
         """Set application theme."""
-        # TODO: Implement theme switching
-        QMessageBox.information(self, "Theme", f"Theme switching to {theme} will be implemented soon.")
+        # Apply theme using theme manager
+        theme_manager.apply_theme(theme)
+        
+        # Update theme action checkmarks
+        for action in self.theme_actions:
+            action.setChecked(theme.lower() in action.text().lower())
+        
+        # Save theme preference
+        if self.config_service:
+            self.config_service.set_setting('theme', theme)
+        
+        self.status_label.setText(f"Theme changed to {theme}")
     
     def show_settings(self):
         """Show settings dialog."""
-        # TODO: Implement settings dialog
-        QMessageBox.information(self, "Settings", "Settings dialog will be implemented soon.")
+        dialog = SettingsDialog(self.config_service, self)
+        dialog.settings_changed.connect(self.on_settings_changed)
+        dialog.theme_changed.connect(self.set_theme)
+        dialog.exec()
     
     def clear_cache(self):
         """Clear application cache."""
@@ -535,9 +624,117 @@ class MainWindow(QMainWindow):
         
         QMessageBox.about(self, "About People Management System", about_text)
     
-    def show_error_message(self, title: str, message: str):
-        """Show error message dialog."""
-        QMessageBox.critical(self, title, message)
+    def show_error_message(self, title: str, message: str, details: str = None):
+        """Show enhanced error message dialog."""
+        show_error(
+            title=title,
+            message=message,
+            details=details,
+            parent=self
+        )
+    
+    def setup_keyboard_shortcuts(self):
+        """Set up keyboard shortcuts for the application."""
+        # Navigation shortcuts
+        QShortcut(QKeySequence("Alt+1"), self, lambda: self.show_view("dashboard"))
+        QShortcut(QKeySequence("Alt+2"), self, lambda: self.show_view("people"))
+        QShortcut(QKeySequence("Alt+3"), self, lambda: self.show_view("departments"))
+        QShortcut(QKeySequence("Alt+4"), self, lambda: self.show_view("positions"))
+        QShortcut(QKeySequence("Alt+5"), self, lambda: self.show_view("employment"))
+        
+        # Action shortcuts
+        QShortcut(QKeySequence("Ctrl+N"), self, self.quick_add_person)
+        QShortcut(QKeySequence("Ctrl+F"), self, self.focus_search)
+        QShortcut(QKeySequence("Ctrl+Shift+T"), self, self.toggle_theme)
+        QShortcut(QKeySequence("Escape"), self, self.escape_pressed)
+        
+        logger.info("Keyboard shortcuts initialized")
+    
+    def quick_add_person(self):
+        """Quick action to add a new person."""
+        # Navigate to people view and trigger add
+        self.show_view("people")
+        if "people" in self.views:
+            view = self.views["people"]
+            if hasattr(view, 'add_person'):
+                view.add_person()
+    
+    def focus_search(self):
+        """Focus on search in current view."""
+        if self.current_view_name in self.views:
+            view = self.views[self.current_view_name]
+            if hasattr(view, 'focus_search'):
+                view.focus_search()
+            elif hasattr(view, 'search_widget'):
+                view.search_widget.setFocus()
+    
+    def toggle_theme(self):
+        """Toggle between light and dark themes."""
+        current_theme = theme_manager.get_current_theme()
+        new_theme = "dark" if current_theme == "light" else "light"
+        self.set_theme(new_theme)
+    
+    def escape_pressed(self):
+        """Handle escape key press."""
+        # Clear search or close dialogs
+        if self.current_view_name in self.views:
+            view = self.views[self.current_view_name]
+            if hasattr(view, 'clear_search'):
+                view.clear_search()
+    
+    def import_data(self):
+        """Import data functionality."""
+        if self.current_view_name in self.views:
+            view = self.views[self.current_view_name]
+            if hasattr(view, 'import_data'):
+                view.import_data()
+            else:
+                QMessageBox.information(
+                    self,
+                    "Import Not Available",
+                    f"Import is not available for the {self.current_view_name} view."
+                )
+        else:
+            QMessageBox.warning(self, "No View", "Please select a view to import data into.")
+    
+    def show_user_guide(self):
+        """Show user guide."""
+        # Try to open USER_GUIDE.md if it exists
+        import os
+        import webbrowser
+        from pathlib import Path
+        
+        guide_path = Path(__file__).parent.parent.parent / "USER_GUIDE.md"
+        if guide_path.exists():
+            webbrowser.open(f"file://{guide_path}")
+        else:
+            QMessageBox.information(
+                self,
+                "User Guide",
+                "User Guide is being prepared.\n\n"
+                "Key Shortcuts:\n"
+                "• Alt+1-5: Navigate views\n"
+                "• Ctrl+N: Add new person\n"
+                "• Ctrl+F: Search\n"
+                "• F5: Refresh\n"
+                "• Ctrl+Shift+T: Toggle theme\n"
+                "• Ctrl+,: Settings\n"
+                "• F1: This help"
+            )
+    
+    def on_settings_changed(self, settings: Dict[str, Any]):
+        """Handle settings changes."""
+        # Apply relevant settings
+        if 'rows_per_page' in settings:
+            # Update all views with new page size
+            for view in self.views.values():
+                if hasattr(view, 'page_size'):
+                    view.page_size = settings['rows_per_page']
+        
+        # Refresh current view to apply changes
+        self.refresh_current_view()
+        
+        self.status_label.setText("Settings applied successfully")
     
     def load_window_settings(self):
         """Load window settings from config."""
