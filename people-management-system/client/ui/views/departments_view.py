@@ -72,16 +72,11 @@ class DepartmentForm(QWidget):
         
         layout.addWidget(details_group)
         
-        # Status and metadata
-        meta_group = QGroupBox("Status & Information")
+        # Metadata information
+        meta_group = QGroupBox("Information")
         meta_layout = QFormLayout(meta_group)
         meta_layout.setVerticalSpacing(10)
         meta_layout.setContentsMargins(5, 10, 5, 5)
-        
-        # Status
-        self.status_combo = QComboBox()
-        self.status_combo.addItems(["Active", "Inactive", "Pending"])
-        meta_layout.addRow("Status:", self.status_combo)
         
         # Created info
         self.created_label = QLabel("-")
@@ -131,7 +126,6 @@ class DepartmentForm(QWidget):
         self.name_edit.textChanged.connect(self.on_form_changed)
         self.description_edit.textChanged.connect(self.on_form_changed)
         self.manager_combo.currentTextChanged.connect(self.on_form_changed)
-        self.status_combo.currentTextChanged.connect(self.on_form_changed)
         
         # Validation
         self.name_edit.textChanged.connect(self.validate_form)
@@ -156,12 +150,13 @@ class DepartmentForm(QWidget):
     
     def get_form_data(self) -> Dict[str, Any]:
         """Get form data."""
-        return {
+        data = {
             'name': self.name_edit.text().strip(),
             'description': self.description_edit.toPlainText().strip() or None,
-            'manager_email': self.manager_combo.currentText().strip() or None,
-            'status': self.status_combo.currentText()
+            'manager_email': self.manager_combo.currentText().strip() or None
         }
+        # Remove None values to avoid sending them to the API
+        return {k: v for k, v in data.items() if v is not None}
     
     def set_form_data(self, data: Dict[str, Any]):
         """Set form data."""
@@ -171,7 +166,6 @@ class DepartmentForm(QWidget):
         self.name_edit.setText(data.get('name', ''))
         self.description_edit.setText(data.get('description', ''))
         self.manager_combo.setCurrentText(data.get('manager_email', ''))
-        self.status_combo.setCurrentText(data.get('status', 'Active'))
         
         # Metadata
         if data.get('created_at'):
@@ -198,7 +192,6 @@ class DepartmentForm(QWidget):
         self.name_edit.clear()
         self.description_edit.clear()
         self.manager_combo.setCurrentText("")
-        self.status_combo.setCurrentText("Active")
         
         self.created_label.setText("-")
         self.modified_label.setText("-")
@@ -405,11 +398,6 @@ class DepartmentsView(QWidget):
             'manager_email': {
                 'label': 'Manager Email',
                 'type': 'text'
-            },
-            'status': {
-                'label': 'Status',
-                'type': 'choice',
-                'choices': ['Active', 'Inactive', 'Pending']
             }
         }
         
@@ -422,8 +410,8 @@ class DepartmentsView(QWidget):
             ColumnConfig('name', 'Name', 200),
             ColumnConfig('description', 'Description', 300),
             ColumnConfig('manager_email', 'Manager', 200),
-            ColumnConfig('status', 'Status', 100),
-            ColumnConfig('employee_count', 'Employees', 100),
+            ColumnConfig('active_employee_count', 'Active Employees', 120),
+            ColumnConfig('position_count', 'Positions', 100),
             ColumnConfig('created_at', 'Created', 150, formatter=self.format_datetime),
             ColumnConfig('updated_at', 'Modified', 150, formatter=self.format_datetime),
         ]
@@ -436,6 +424,7 @@ class DepartmentsView(QWidget):
         # API service connections
         self.api_service.data_updated.connect(self.on_data_updated)
         self.api_service.operation_completed.connect(self.on_operation_completed)
+        self.api_service.connection_error.connect(self.on_api_error)
         
         # Search widget connections
         self.search_widget.search_requested.connect(self.on_search_requested)
@@ -586,13 +575,20 @@ class DepartmentsView(QWidget):
     
     def on_operation_completed(self, operation: str, success: bool, message: str):
         """Handle operation completion."""
-        if success and operation in ['create_department', 'update_department', 'delete_department']:
-            self.refresh_data()
-            
-            if operation == 'delete_department':
-                self.selected_department = None
-                self.edit_btn.setEnabled(False)
-                self.delete_btn.setEnabled(False)
+        if operation in ['create_department', 'update_department', 'delete_department']:
+            if success:
+                self.refresh_data()
+                
+                # Show success message
+                QMessageBox.information(self, "Success", message)
+                
+                if operation == 'delete_department':
+                    self.selected_department = None
+                    self.edit_btn.setEnabled(False)
+                    self.delete_btn.setEnabled(False)
+            else:
+                # Show error message
+                QMessageBox.critical(self, "Error", f"Operation failed: {message}")
     
     def add_department(self):
         """Add new department."""
@@ -600,6 +596,7 @@ class DepartmentsView(QWidget):
         
         if dialog.exec() == QDialog.Accepted:
             department_data = dialog.get_form_data()
+            logger.debug(f"Creating department with data: {department_data}")
             self.api_service.create_department_async(department_data)
     
     def edit_department(self):
@@ -614,13 +611,8 @@ class DepartmentsView(QWidget):
             department_id = self.selected_department.get('id')
             
             if department_id:
-                # Note: API service doesn't have update_department_async yet
-                # This would need to be implemented in the API service
-                QMessageBox.information(
-                    self,
-                    "Update Department", 
-                    "Department update functionality will be implemented soon."
-                )
+                logger.debug(f"Updating department {department_id} with data: {department_data}")
+                self.api_service.update_department_async(department_id, department_data)
     
     def delete_department(self):
         """Delete selected department(s)."""
@@ -645,12 +637,7 @@ class DepartmentsView(QWidget):
             for department in selected_items:
                 department_id = department.get('id')
                 if department_id:
-                    # Note: API service doesn't have delete_department_async yet
-                    QMessageBox.information(
-                        self,
-                        "Delete Department",
-                        "Department deletion functionality will be implemented soon."
-                    )
+                    self.api_service.delete_department_async(department_id)
     
     def export_departments(self):
         """Export departments to file."""
@@ -659,6 +646,11 @@ class DepartmentsView(QWidget):
     def refresh(self):
         """Refresh the view."""
         self.refresh_data()
+    
+    def on_api_error(self, error_message: str):
+        """Handle API errors."""
+        logger.error(f"API error in departments view: {error_message}")
+        QMessageBox.critical(self, "API Error", f"An error occurred: {error_message}")
     
     def showEvent(self, event):
         """Handle show event."""

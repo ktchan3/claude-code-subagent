@@ -65,8 +65,29 @@ async def create_department(
         db.commit()
         db.refresh(db_department)
         
+        # Calculate counts for response
+        position_count = db.query(Position).filter(
+            Position.department_id == db_department.id
+        ).count()
+        
+        active_employee_count = db.query(Employment).join(Position).filter(
+            Position.department_id == db_department.id,
+            Employment.end_date.is_(None)
+        ).count()
+        
         logger.info(f"Created new department: {db_department.name} ({db_department.id})")
-        return DepartmentResponse.from_orm(db_department)
+        
+        # Create response with calculated fields
+        response_data = {
+            'id': db_department.id,
+            'name': db_department.name,
+            'description': db_department.description,
+            'position_count': position_count,
+            'active_employee_count': active_employee_count,
+            'created_at': db_department.created_at,
+            'updated_at': db_department.updated_at
+        }
+        return DepartmentResponse(**response_data)
         
     except DepartmentNameExistsError:
         raise
@@ -173,7 +194,27 @@ async def get_department(
         if not department:
             raise DepartmentNotFoundError(str(department_id))
         
-        return DepartmentResponse.from_orm(department)
+        # Calculate counts for response
+        position_count = db.query(Position).filter(
+            Position.department_id == department.id
+        ).count()
+        
+        active_employee_count = db.query(Employment).join(Position).filter(
+            Position.department_id == department.id,
+            Employment.end_date.is_(None)
+        ).count()
+        
+        # Create response with calculated fields
+        response_data = {
+            'id': department.id,
+            'name': department.name,
+            'description': department.description,
+            'position_count': position_count,
+            'active_employee_count': active_employee_count,
+            'created_at': department.created_at,
+            'updated_at': department.updated_at
+        }
+        return DepartmentResponse(**response_data)
         
     except DepartmentNotFoundError:
         raise
@@ -211,9 +252,25 @@ async def get_department_with_positions(
             }
             positions_data.append(position_data)
         
+        # Calculate counts for response
+        position_count = len(department.positions)
+        
+        active_employee_count = db.query(Employment).join(Position).filter(
+            Position.department_id == department.id,
+            Employment.end_date.is_(None)
+        ).count()
+        
         # Create response data
-        dept_data = DepartmentResponse.from_orm(department).model_dump()
-        dept_data["positions"] = positions_data
+        dept_data = {
+            'id': department.id,
+            'name': department.name,
+            'description': department.description,
+            'position_count': position_count,
+            'active_employee_count': active_employee_count,
+            'created_at': department.created_at,
+            'updated_at': department.updated_at,
+            'positions': positions_data
+        }
         
         return DepartmentWithPositions(**dept_data)
         
@@ -377,8 +434,29 @@ async def update_department(
         db.commit()
         db.refresh(department)
         
+        # Calculate counts for response
+        position_count = db.query(Position).filter(
+            Position.department_id == department.id
+        ).count()
+        
+        active_employee_count = db.query(Employment).join(Position).filter(
+            Position.department_id == department.id,
+            Employment.end_date.is_(None)
+        ).count()
+        
         logger.info(f"Updated department: {department.name} ({department.id})")
-        return DepartmentResponse.from_orm(department)
+        
+        # Create response with calculated fields
+        response_data = {
+            'id': department.id,
+            'name': department.name,
+            'description': department.description,
+            'position_count': position_count,
+            'active_employee_count': active_employee_count,
+            'created_at': department.created_at,
+            'updated_at': department.updated_at
+        }
+        return DepartmentResponse(**response_data)
         
     except (DepartmentNotFoundError, DepartmentNameExistsError):
         raise

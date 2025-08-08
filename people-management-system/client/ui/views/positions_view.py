@@ -28,11 +28,12 @@ logger = logging.getLogger(__name__)
 class PositionDialog(QDialog):
     """Dialog for adding/editing positions."""
     
-    def __init__(self, position_data: Optional[Dict[str, Any]] = None, parent=None):
+    def __init__(self, position_data: Optional[Dict[str, Any]] = None, api_service: Optional[APIService] = None, parent=None):
         super().__init__(parent)
         
         self.position_data = position_data
         self.is_editing = bool(position_data)
+        self.api_service = api_service
         
         title = "Edit Position" if self.is_editing else "Add New Position"
         self.setWindowTitle(title)
@@ -40,6 +41,7 @@ class PositionDialog(QDialog):
         self.resize(600, 500)
         
         self.setup_ui()
+        self.load_departments()
         
         if position_data:
             self.set_form_data(position_data)
@@ -130,6 +132,23 @@ class PositionDialog(QDialog):
         self.ok_button = button_box.button(QDialogButtonBox.Ok)
         self.title_edit.textChanged.connect(self.validate_form)
         self.validate_form()
+    
+    def load_departments(self):
+        """Load departments for the dropdown."""
+        if self.api_service:
+            # Load departments synchronously for simplicity
+            try:
+                result = self.api_service.list_departments(page=1, page_size=100)
+                departments = result.get('items', [])
+                
+                self.department_combo.clear()
+                self.department_combo.addItem("", None)  # Empty option
+                
+                for dept in departments:
+                    self.department_combo.addItem(dept.get('name', ''), dept.get('id'))
+                    
+            except Exception as e:
+                logger.error(f"Failed to load departments: {e}")
     
     def validate_form(self):
         """Validate form data."""
@@ -534,32 +553,25 @@ class PositionsView(QWidget):
     
     def add_position(self):
         """Add new position."""
-        dialog = PositionDialog(parent=self)
+        dialog = PositionDialog(api_service=self.api_service, parent=self)
         
         if dialog.exec() == QDialog.Accepted:
             position_data = dialog.get_form_data()
-            # Note: This would need to be implemented in API service
-            QMessageBox.information(
-                self,
-                "Add Position",
-                "Position creation functionality will be implemented soon."
-            )
+            self.api_service.create_position_async(position_data)
     
     def edit_position(self):
         """Edit selected position."""
         if not self.selected_position:
             return
         
-        dialog = PositionDialog(self.selected_position, parent=self)
+        dialog = PositionDialog(self.selected_position, api_service=self.api_service, parent=self)
         
         if dialog.exec() == QDialog.Accepted:
             position_data = dialog.get_form_data()
-            # Note: This would need to be implemented in API service
-            QMessageBox.information(
-                self,
-                "Edit Position",
-                "Position editing functionality will be implemented soon."
-            )
+            position_id = self.selected_position.get('id')
+            
+            if position_id:
+                self.api_service.update_position_async(position_id, position_data)
     
     def delete_position(self):
         """Delete selected position(s)."""
@@ -581,12 +593,10 @@ class PositionsView(QWidget):
         )
         
         if reply == QMessageBox.Yes:
-            # Note: This would need to be implemented in API service
-            QMessageBox.information(
-                self,
-                "Delete Position",
-                "Position deletion functionality will be implemented soon."
-            )
+            for position in selected_items:
+                position_id = position.get('id')
+                if position_id:
+                    self.api_service.delete_position_async(position_id)
     
     def export_positions(self):
         """Export positions to file."""

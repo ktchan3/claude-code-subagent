@@ -16,6 +16,84 @@ This guide provides solutions to common issues encountered while developing, tes
 
 ## Critical Issues (RESOLVED)
 
+### Event Loop Conflicts in Qt Application (January 2025)
+
+**Status**: ✅ RESOLVED
+
+**Symptoms**:
+- RuntimeError: "This event loop is already running"
+- Application crashes during async operations
+- Inconsistent behavior when making API calls
+
+**Root Cause**:
+Qt's event loop conflicted with asyncio's event loop when using `asyncio.run()`
+
+**Solution Applied**:
+```python
+# Location: client/utils/async_utils.py:53-66
+# Create new event loop in thread
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+try:
+    self.result = loop.run_until_complete(self.func(*self.args, **self.kwargs))
+finally:
+    loop.close()
+```
+
+**Prevention**:
+- Always use `loop.run_until_complete()` instead of `asyncio.run()` in Qt apps
+- Create new event loops in worker threads
+- Properly close event loops after use
+
+### Connection Indicator AttributeError (January 2025)
+
+**Status**: ✅ RESOLVED
+
+**Symptoms**:
+- AttributeError: 'MainWindow' object has no attribute 'connection_indicator'
+- Crashes during UI initialization
+- Connection status not updating
+
+**Root Cause**:
+UI elements accessed before initialization completed
+
+**Solution Applied**:
+```python
+# Location: client/ui/main_window.py:519-534
+if hasattr(self, 'connection_indicator'):
+    self.connection_indicator.setText(get_emoji('connected'))
+```
+
+**Prevention**:
+- Always use `hasattr()` checks for UI elements
+- Initialize UI components in proper order
+- Add defensive programming for UI access
+
+### Department CRUD Operations Failures (January 2025)
+
+**Status**: ✅ RESOLVED
+
+**Symptoms**:
+- Add/Edit/Delete buttons not working for departments
+- Field name mismatches causing errors
+- Missing columns in department table
+
+**Root Cause**:
+- Non-existent `status` field in forms
+- Incorrect field name `employee_count` instead of `active_employee_count`
+- Missing `position_count` field
+
+**Solution Applied**:
+- Removed `status` field from department forms
+- Renamed fields to match API schema
+- Added complete CRUD methods to API service
+- Fixed server-side response generation
+
+**Files Modified**:
+- `client/ui/views/departments_view.py`
+- `client/services/api_service.py`
+- `server/api/routes/departments.py`
+
 ### Person Fields Not Saving to Database
 
 **Status**: ✅ RESOLVED
@@ -702,6 +780,127 @@ uv sync
 ```
 
 ## Debugging Tips
+
+### Event Loop Debugging (January 2025 Update)
+
+**Diagnose Event Loop Issues**:
+```bash
+# Check async utils functionality
+uv run python -c "from client.utils.async_utils import SyncTaskWorker; print('Async utils OK')"
+
+# Test event loop management
+uv run python -c "
+import asyncio
+from client.utils.async_utils import SyncTaskWorker
+
+async def test_func():
+    return 'Success'
+
+worker = SyncTaskWorker(test_func)
+print('Worker created successfully')
+"
+```
+
+**Monitor Event Loop Status**:
+```python
+import asyncio
+import sys
+
+# Check if event loop is running
+try:
+    loop = asyncio.get_running_loop()
+    print(f"Event loop is running: {loop}")
+except RuntimeError:
+    print("No event loop running")
+
+# In Qt applications, check Qt event loop
+from PySide6.QtCore import QCoreApplication
+app = QCoreApplication.instance()
+if app:
+    print(f"Qt application running: {app}")
+```
+
+### Department Operations Debugging (January 2025 Update)
+
+**Test Department CRUD**:
+```bash
+# List departments
+curl http://localhost:8000/api/v1/departments
+
+# Create department
+curl -X POST http://localhost:8000/api/v1/departments \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Test Dept", "description": "Testing"}'
+
+# Verify field names
+uv run python -c "
+from server.api.schemas.department import DepartmentResponse
+print('Department fields:', list(DepartmentResponse.__fields__.keys()))
+"
+```
+
+**Check Field Mappings**:
+```python
+# Verify client-server field consistency
+from server.api.schemas.department import DepartmentResponse
+from client.ui.views.departments_view import DepartmentForm
+
+# Server fields
+server_fields = set(DepartmentResponse.__fields__.keys())
+print(f"Server expects: {server_fields}")
+
+# Check for mismatches
+expected = {'active_employee_count', 'position_count'}
+if expected.issubset(server_fields):
+    print("Field names are correct")
+else:
+    print(f"Missing fields: {expected - server_fields}")
+```
+
+### API Field Validation (January 2025 Update)
+
+**Validate API Responses**:
+```python
+import requests
+import json
+
+def validate_department_response():
+    response = requests.get("http://localhost:8000/api/v1/departments")
+    data = response.json()
+    
+    # Check response structure
+    if isinstance(data, list) and len(data) > 0:
+        dept = data[0]
+        required_fields = [
+            'id', 'name', 'description',
+            'active_employee_count',  # NOT employee_count
+            'position_count'          # Required field
+        ]
+        
+        for field in required_fields:
+            if field not in dept:
+                print(f"Missing field: {field}")
+            else:
+                print(f"✓ {field}: {dept[field]}")
+    
+validate_department_response()
+```
+
+**Monitor API Calls**:
+```python
+# Enable detailed logging for API calls
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# Log all HTTP requests
+import http.client
+http.client.HTTPConnection.debuglevel = 1
+
+# Now all API calls will show detailed information
+from client.services.api_service import APIService
+api = APIService(config)
+api.get_departments()  # Will show full request/response
+```
 
 ### Enable Debug Logging
 

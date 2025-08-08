@@ -28,11 +28,12 @@ logger = logging.getLogger(__name__)
 class EmploymentDialog(QDialog):
     """Dialog for adding/editing employment records."""
     
-    def __init__(self, employment_data: Optional[Dict[str, Any]] = None, parent=None):
+    def __init__(self, employment_data: Optional[Dict[str, Any]] = None, api_service: Optional[APIService] = None, parent=None):
         super().__init__(parent)
         
         self.employment_data = employment_data
         self.is_editing = bool(employment_data)
+        self.api_service = api_service
         
         title = "Edit Employment Record" if self.is_editing else "Add New Employment Record"
         self.setWindowTitle(title)
@@ -40,6 +41,7 @@ class EmploymentDialog(QDialog):
         self.resize(600, 500)
         
         self.setup_ui()
+        self.load_data()
         
         if employment_data:
             self.set_form_data(employment_data)
@@ -135,6 +137,37 @@ class EmploymentDialog(QDialog):
         self.person_combo.currentTextChanged.connect(self.validate_form)
         self.position_combo.currentTextChanged.connect(self.validate_form)
         self.validate_form()
+    
+    def load_data(self):
+        """Load people and positions for dropdowns."""
+        if self.api_service:
+            try:
+                # Load people
+                people_result = self.api_service.list_people(page=1, page_size=200)
+                people = people_result.get('items', [])
+                
+                self.person_combo.clear()
+                self.person_combo.addItem("", None)
+                
+                for person in people:
+                    name = f"{person.get('first_name', '')} {person.get('last_name', '')}".strip()
+                    self.person_combo.addItem(name, person.get('id'))
+                
+                # Load positions
+                positions_result = self.api_service.list_positions(page=1, page_size=200)
+                positions = positions_result.get('items', [])
+                
+                self.position_combo.clear()
+                self.position_combo.addItem("", None)
+                
+                for position in positions:
+                    title = position.get('title', '')
+                    dept = position.get('department_name', '')
+                    display = f"{title} ({dept})" if dept else title
+                    self.position_combo.addItem(display, position.get('id'))
+                    
+            except Exception as e:
+                logger.error(f"Failed to load data for employment dialog: {e}")
     
     def validate_form(self):
         """Validate form data."""
@@ -664,32 +697,25 @@ class EmploymentView(QWidget):
     
     def add_employment(self):
         """Add new employment record."""
-        dialog = EmploymentDialog(parent=self)
+        dialog = EmploymentDialog(api_service=self.api_service, parent=self)
         
         if dialog.exec() == QDialog.Accepted:
             employment_data = dialog.get_form_data()
-            # Note: This would need to be implemented in API service
-            QMessageBox.information(
-                self,
-                "Add Employment",
-                "Employment creation functionality will be implemented soon."
-            )
+            self.api_service.create_employment_async(employment_data)
     
     def edit_employment(self):
         """Edit selected employment record."""
         if not self.selected_employment:
             return
         
-        dialog = EmploymentDialog(self.selected_employment, parent=self)
+        dialog = EmploymentDialog(self.selected_employment, api_service=self.api_service, parent=self)
         
         if dialog.exec() == QDialog.Accepted:
             employment_data = dialog.get_form_data()
-            # Note: This would need to be implemented in API service
-            QMessageBox.information(
-                self,
-                "Edit Employment",
-                "Employment editing functionality will be implemented soon."
-            )
+            employment_id = self.selected_employment.get('id')
+            
+            if employment_id:
+                self.api_service.update_employment_async(employment_id, employment_data)
     
     def end_employment(self):
         """End the selected employment record."""
@@ -713,12 +739,12 @@ class EmploymentView(QWidget):
         if reply == QMessageBox.Yes:
             employment_id = self.selected_employment.get('id')
             if employment_id:
-                # Note: This would need to be implemented in API service
-                QMessageBox.information(
-                    self,
-                    "End Employment",
-                    "End employment functionality will be implemented soon."
-                )
+                # Update employment with end date and inactive status
+                update_data = {
+                    'end_date': date.today().strftime('%Y-%m-%d'),
+                    'is_active': False
+                }
+                self.api_service.update_employment_async(employment_id, update_data)
     
     def delete_employment(self):
         """Delete selected employment record(s)."""
@@ -740,12 +766,10 @@ class EmploymentView(QWidget):
         )
         
         if reply == QMessageBox.Yes:
-            # Note: This would need to be implemented in API service
-            QMessageBox.information(
-                self,
-                "Delete Employment",
-                "Employment deletion functionality will be implemented soon."
-            )
+            for employment in selected_items:
+                employment_id = employment.get('id')
+                if employment_id:
+                    self.api_service.delete_employment_async(employment_id)
     
     def show_active_only(self):
         """Show only active employment records."""

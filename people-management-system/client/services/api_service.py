@@ -501,7 +501,68 @@ class APIService(QObject):
         worker.finished.connect(
             lambda result: self.operation_completed.emit("create_department", True, "Department created successfully")
         )
+        worker.error.connect(
+            lambda error: self.operation_completed.emit("create_department", False, str(error))
+        )
         worker.start()
+    
+    def update_department(self, department_id: str, department_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update department."""
+        result = self.client.update_department(department_id, department_data)
+        
+        # Invalidate cache
+        self._invalidate_cache('departments_')
+        self._invalidate_cache(f'department_{department_id}')
+        
+        return result
+    
+    def update_department_async(self, department_id: str, department_data: Dict[str, Any]):
+        """Update department asynchronously."""
+        self.operation_started.emit(f"Updating department {department_id}...")
+        worker = self._create_worker(self.update_department, department_id, department_data)
+        worker.finished.connect(
+            lambda result: self.operation_completed.emit("update_department", True, "Department updated successfully")
+        )
+        worker.error.connect(
+            lambda error: self.operation_completed.emit("update_department", False, str(error))
+        )
+        worker.start()
+    
+    def delete_department(self, department_id: str) -> Dict[str, Any]:
+        """Delete department."""
+        result = self.client.delete_department(department_id)
+        
+        # Invalidate cache
+        self._invalidate_cache('departments_')
+        self._invalidate_cache(f'department_{department_id}')
+        
+        return result
+    
+    def delete_department_async(self, department_id: str):
+        """Delete department asynchronously."""
+        self.operation_started.emit(f"Deleting department {department_id}...")
+        worker = self._create_worker(self.delete_department, department_id)
+        worker.finished.connect(
+            lambda result: self.operation_completed.emit("delete_department", True, "Department deleted successfully")
+        )
+        worker.error.connect(
+            lambda error: self.operation_completed.emit("delete_department", False, str(error))
+        )
+        worker.start()
+    
+    def get_department(self, department_id: str, use_cache: bool = True) -> Dict[str, Any]:
+        """Get department by ID."""
+        cache_key = f"department_{department_id}"
+        
+        if use_cache:
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data:
+                return cached_data
+        
+        result = self.client.get_department(department_id)
+        self._set_cached_data(cache_key, result)
+        
+        return result
     
     # Position operations
     
@@ -540,6 +601,75 @@ class APIService(QObject):
             lambda result: self.data_updated.emit("positions", result)
         )
         worker.start()
+    
+    def create_position(self, position_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create position."""
+        position = PositionData(**position_data)
+        result = self.client.create_position(position)
+        
+        self._invalidate_cache('positions_')
+        return result
+    
+    def create_position_async(self, position_data: Dict[str, Any]):
+        """Create position asynchronously."""
+        self.operation_started.emit("Creating position...")
+        worker = self._create_worker(self.create_position, position_data)
+        worker.finished.connect(
+            lambda result: self.operation_completed.emit("create_position", True, "Position created successfully")
+        )
+        worker.start()
+    
+    def update_position(self, position_id: str, position_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update position."""
+        result = self.client.update_position(position_id, position_data)
+        
+        # Invalidate cache
+        self._invalidate_cache('positions_')
+        self._invalidate_cache(f'position_{position_id}')
+        
+        return result
+    
+    def update_position_async(self, position_id: str, position_data: Dict[str, Any]):
+        """Update position asynchronously."""
+        self.operation_started.emit(f"Updating position {position_id}...")
+        worker = self._create_worker(self.update_position, position_id, position_data)
+        worker.finished.connect(
+            lambda result: self.operation_completed.emit("update_position", True, "Position updated successfully")
+        )
+        worker.start()
+    
+    def delete_position(self, position_id: str) -> Dict[str, Any]:
+        """Delete position."""
+        result = self.client.delete_position(position_id)
+        
+        # Invalidate cache
+        self._invalidate_cache('positions_')
+        self._invalidate_cache(f'position_{position_id}')
+        
+        return result
+    
+    def delete_position_async(self, position_id: str):
+        """Delete position asynchronously."""
+        self.operation_started.emit(f"Deleting position {position_id}...")
+        worker = self._create_worker(self.delete_position, position_id)
+        worker.finished.connect(
+            lambda result: self.operation_completed.emit("delete_position", True, "Position deleted successfully")
+        )
+        worker.start()
+    
+    def get_position(self, position_id: str, use_cache: bool = True) -> Dict[str, Any]:
+        """Get position by ID."""
+        cache_key = f"position_{position_id}"
+        
+        if use_cache:
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data:
+                return cached_data
+        
+        result = self.client.get_position(position_id)
+        self._set_cached_data(cache_key, result)
+        
+        return result
     
     # Employment operations
     
@@ -584,6 +714,75 @@ class APIService(QObject):
             lambda result: self.data_updated.emit("employment", result)
         )
         worker.start()
+    
+    def create_employment(self, employment_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create employment record."""
+        employment = EmploymentData(**employment_data)
+        result = self.client.create_employment(employment)
+        
+        self._invalidate_cache('employment_')
+        return result
+    
+    def create_employment_async(self, employment_data: Dict[str, Any]):
+        """Create employment asynchronously."""
+        self.operation_started.emit("Creating employment record...")
+        worker = self._create_worker(self.create_employment, employment_data)
+        worker.finished.connect(
+            lambda result: self.operation_completed.emit("create_employment", True, "Employment record created successfully")
+        )
+        worker.start()
+    
+    def update_employment(self, employment_id: str, employment_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update employment record."""
+        result = self.client.update_employment(employment_id, employment_data)
+        
+        # Invalidate cache
+        self._invalidate_cache('employment_')
+        self._invalidate_cache(f'employment_{employment_id}')
+        
+        return result
+    
+    def update_employment_async(self, employment_id: str, employment_data: Dict[str, Any]):
+        """Update employment asynchronously."""
+        self.operation_started.emit(f"Updating employment record {employment_id}...")
+        worker = self._create_worker(self.update_employment, employment_id, employment_data)
+        worker.finished.connect(
+            lambda result: self.operation_completed.emit("update_employment", True, "Employment record updated successfully")
+        )
+        worker.start()
+    
+    def delete_employment(self, employment_id: str) -> Dict[str, Any]:
+        """Delete employment record."""
+        result = self.client.delete_employment(employment_id)
+        
+        # Invalidate cache
+        self._invalidate_cache('employment_')
+        self._invalidate_cache(f'employment_{employment_id}')
+        
+        return result
+    
+    def delete_employment_async(self, employment_id: str):
+        """Delete employment asynchronously."""
+        self.operation_started.emit(f"Deleting employment record {employment_id}...")
+        worker = self._create_worker(self.delete_employment, employment_id)
+        worker.finished.connect(
+            lambda result: self.operation_completed.emit("delete_employment", True, "Employment record deleted successfully")
+        )
+        worker.start()
+    
+    def get_employment(self, employment_id: str, use_cache: bool = True) -> Dict[str, Any]:
+        """Get employment record by ID."""
+        cache_key = f"employment_{employment_id}"
+        
+        if use_cache:
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data:
+                return cached_data
+        
+        result = self.client.get_employment(employment_id)
+        self._set_cached_data(cache_key, result)
+        
+        return result
     
     # Statistics operations
     

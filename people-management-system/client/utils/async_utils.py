@@ -49,11 +49,21 @@ class SyncTaskWorker(QThread):
             
             # Check if the function is a coroutine or async function
             if inspect.iscoroutinefunction(self.func):
-                # Run async function in new event loop
-                self.result = asyncio.run(self.func(*self.args, **self.kwargs))
+                # Create new event loop in thread to avoid conflicts
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    self.result = loop.run_until_complete(self.func(*self.args, **self.kwargs))
+                finally:
+                    loop.close()
             elif inspect.iscoroutine(self.func):
                 # It's already a coroutine object, run it
-                self.result = asyncio.run(self.func)
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    self.result = loop.run_until_complete(self.func)
+                finally:
+                    loop.close()
             else:
                 # Regular synchronous function
                 self.result = self.func(*self.args, **self.kwargs)
